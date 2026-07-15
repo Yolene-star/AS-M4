@@ -1,282 +1,310 @@
-<h1 align="center">Multi-modal Multiplexing Modeling</h1>
-<p align="center">
-    <a href="https://arxiv.org/abs/2503.22952">
-            <img alt="Build" src="http://img.shields.io/badge/cs.CV-arXiv%3A2503.22952-B31B1B.svg">
-    </a>
-    <a href="https://omnimmi.github.io/m4">
-        <img alt="Build" src="https://img.shields.io/badge/M4-page-blue">
-    </a>
-    <a href="https://cvpr.thecvf.com/Conferences/2025">
-            <img alt="Build" src="http://img.shields.io/badge/CVPR-2025-4b44ce.svg">
-    </a>
-    <br>
-    <a href="https://huggingface.co/ColorfulAI/M4-LongVA-7B-Qwen2">
-        <img alt="Build" src="https://img.shields.io/badge/🤗 Model-M4--7B-yellow">
-    </a>
-    <a href="https://huggingface.co/ColorfulAI/M4-Audio-LongVA-7B-Qwen2">
-        <img alt="Build" src="https://img.shields.io/badge/🤗 Model-M4--Audio--7B-yellow">
-    </a>
-    <a href="https://huggingface.co/datasets/ColorfulAI/M4-IT">
-        <img alt="Build" src="https://img.shields.io/badge/🤗 Dataset-M4--IT-yellow">
-    </a>
-</p>
+# AS-M4：Audio-Sensitive M4
 
-<!-- [![Conference](http://img.shields.io/badge/CVPR-2025-4b44ce.svg)](https://cvpr.thecvf.com/Conferences/2025) -->
+AS-M4 是在 M4 / LongVA / LLaVA-NeXT / Qwen2 多模态交互框架上的本地扩展工程。原始 M4 主要处理视频/图像、文本问题和用户语音问题；AS-M4 在此基础上新增独立的场景音频 `scene_audio` 路径，用声音事件、音视频时间对齐、置信门控和残差融合提升流式视频理解能力。
 
-![image](assets/framework.png)
+原始 M4 README 已保留为 [`README_M4_ORIGINAL.md`](README_M4_ORIGINAL.md)。更完整的中文架构说明见 [`docs/M4_architecture_zh.md`](docs/M4_architecture_zh.md)，本地复现状态见 [`REPRODUCTION_STATUS.md`](REPRODUCTION_STATUS.md)，AS-M4 分阶段实现协议见 [`AS_M4_CODEX_IMPLEMENTATION_PLAYBOOK.md`](AS_M4_CODEX_IMPLEMENTATION_PLAYBOOK.md)。
 
-## Updates
+## 当前工程目标
 
-<!-- - [] Paper Release, check it on [Arxiv](https://arxiv.org/pdf/xxxx.xxxxx.pdf).  -->
-- `2025-04-02` **First Release [Open-Omni-Nexus](https://github.com/patrick-tssn/Open-Omni-Nexus)**. a fully open-source implementation of a GPT-4o-like speech-to-speech video understanding model.
-- `2025-04-01` **Evaluate on [OmniMMI](https://github.com/bigai-nlco/OmniMMI)**. A comprehensive multi-modal interaction benchmark in streaming video context.
-- `2025-04-01` **First Release [M4](https://github.com/patrick-tssn/M4)**. M4 enables multiplexed modeling capabilities for a visual language model at minimal cost.
+AS-M4 的目标不是重写 Qwen2、CLIP、Whisper 等大骨干，而是在原 M4 的视频 token 流上增加一条可关闭、可回退、可渐进训练的场景音频增强链路：
 
-**Table of Contents**
+```text
+视频帧 / 预计算视频特征
+  -> CLIP / video_feature
+  -> video tokens [B, T, N, H]
 
-- [M4](#m4)
-  - [Introduction](#introduction)
-  - [M4-IT](#m4-it-dataset)
-- [Train](#training)
-  - [Installation](#installation)
-  - [Data Preparation](#data-preparation)
-  - [Backbone Preparation](#pretrained-backbone-preparation)
-  - [Start Training](#start-training)
-- [Usage](#usage)
-- [Evaluation](#evaluation)
-- [Roadmap](#roadmap)
-- [Acknowledgement](#acknowledgement)
-- [Citation](#citation)
+场景音频 scene_audio
+  -> SceneAudioEncoder
+  -> audio features [B, A, H]
+  -> AudioEventDetector
+  -> CausalTemporalAligner
+  -> AudioConfidenceGate
+  -> GatedAVFusion
+  -> fused video tokens [B, T, N, H]
 
-## M4
-
-### Introduction
-
-We introduce Multimodal Multiplexing Modeling (M4), a framework that enhances real-time interactive reasoning with minimal fine-tuning on pre-trained MLLMs.
-
-- **M4-IT Dataset**: A synthetic instruction finetuning dataset with components interleaved image-text instruction, noise instruction, and stop instruction.
-- **M4 Model**: Enhances proactive response generation, assesses new queries against noise, by enabling parallel decoding.
-
-### M4-IT Dataset
-
-Building on the [LLaVA-NeXT-Data](https://huggingface.co/datasets/lmms-lab/LLaVA-NeXT-Data), we crafted a small video-free synthetic instruction finetuning dataset, M4-IT, with the assistance of GPT-4o. M4-IT comprises four components:
-
-- the original instruction, which is a data replay from the instruction data of our base model
-- interleaved image-text instruction, which is created by reordering the question and image components of the original instruction
-- noise instruction, where GPT-4 is prompted to automatically generate statements that do not require a response
-- stop instruction, where GPT-4 is prompted to generate stop phrases for the stop instruction
-
-In addition, to assist with audio instruction tuning, we convert user queries into audio using [CosyVoice](https://github.com/FunAudioLLM/CosyVoice), with a randomly selected [VoiceAssistant](https://huggingface.co/datasets/gpt-omni/VoiceAssistant-400K) as a prompt.
-
-**Data Statistics**
-
-The M4-IT dataset comprises a total of 9,963 instructions. The distribution across different categories is as follows:
-
-| Category   | Count |
-| ---------- | ----- |
-| Original   | 2,624 |
-| Interleave | 2,376 |
-| Noise      | 2,563 |
-| Stop       | 2,500 |
-
-Data sample
-
-```json
-    {
-        "id": "000000240632",
-        "image": "000000240632.jpg",
-        "conversations": [
-            {
-                "from": "human",
-                "value": "<image>\n"
-            },
-            {
-                "from": "human",
-                "value": "<speech>\n" # provide the bounding box coordinates of the region that the given sentence describes
-            },
-            {
-                "from": "gpt",
-                "value": "[0.280,0.194,0.628,0.824]"
-            },
-            {
-                "from": "human",
-                "value": "<speech>\n" # Could I stop you for a second?
-            },
-            {
-                "from": "gpt",
-                "value": "<|im_end|>"
-            }
-        ],
-        "speech": [
-            "000000240632_0.wav",
-            "000000240632_1.wav"
-        ]
-    },
+fused video tokens + text tokens
+  -> Qwen2 Causal LM
 ```
 
-If you are interested in the process of the construction of audio instruction, you can refer to the scripts in `preprocess/tts`
+第一版 AS-M4 遵守三条兼容约束：
 
-## Training
+1. `speech` / 用户问题语音与 `scene_audio` / 视频场景音频是两条独立输入职责。
+2. 残差融合前后视频 token 数量保持一致，不新增 `<scene_audio>` 特殊 token，不改 tokenizer 词表。
+3. 新增模块都必须支持配置关闭；关闭 `AS_M4_ENABLE_SCENE_AUDIO` 或强制 `AS_M4_FORCE_AUDIO_GATE=0` 时，应回退到原 M4 行为路径。
 
-### Installation
+## 主要目录
 
-This codebase is tested on CUDA 11.8 and A800-80G.
+```text
+M4-main/
+├── AGENTS.md                                  # 本机 GPU、训练和 Git 执行规则
+├── AS_M4_CODEX_IMPLEMENTATION_PLAYBOOK.md     # AS-M4 分阶段实现手册
+├── REPRODUCTION_STATUS.md                     # 本地复现状态记录
+├── docs/
+│   └── M4_architecture_zh.md                  # M4/AS-M4 中文架构说明
+├── preprocess/
+│   └── tts/                                   # 音频训练数据构建脚本
+├── scripts/
+│   └── download_omnimmi_assets.py             # OmniMMI 资源下载辅助脚本
+└── intersuit/
+    ├── intersuit/
+    │   ├── model/
+    │   │   ├── llava_arch.py                  # 多模态打包与 AS-M4 融合主逻辑
+    │   │   ├── language_model/llava_qwen.py   # Qwen2 forward / chunked LM loss
+    │   │   ├── scene_audio_encoder/           # 场景音频编码器
+    │   │   └── streaming_av/                  # 事件、对齐、门控、融合模块
+    │   ├── streaming/                         # 流式音视频 buffer / 切窗 / 调度工具
+    │   └── train/                             # 数据集、collator、训练入口
+    ├── scripts/                               # 训练、复现、评测脚本
+    ├── tests/                                 # AS-M4 单元与集成测试
+    └── local_demo/                            # M4 demo 入口
+```
+
+## 新增模块概览
+
+`scene_audio_encoder` 提供场景音频编码接口：
+
+- `DummySceneAudioEncoder`：用窗口波形统计量生成特征，用于 smoke test。
+- `PrecomputedSceneAudioEncoder`：读取预计算音频特征，并对齐到模型 hidden size。
+
+`streaming_av` 提供音视频融合组件：
+
+- `AudioEventDetector`：预测音频窗口的事件类别、事件强度和边界。
+- `CausalTemporalAligner`：在统一时间轴上做音频窗口与视频帧软对齐。
+- `AudioConfidenceGate`：估计音频质量 `quality` 和相关性 `relevance`，门控为 `gate = quality * relevance`。
+- `GatedAVFusion`：用残差方式把可信音频注入视频 token。
+
+`streaming` 提供工程工具：
+
+- `audio_stream.py`：从音频/视频文件加载场景音频，并切成带时间戳窗口。
+- `av_buffer.py`：维护统一时间轴上的音频窗口和视频帧。
+- `frame_scheduler.py`：根据音频事件强度做帧选择优先级调度。
+
+## 环境约束
+
+当前工程在本地服务器 `star-SYS-420GP-TNR` 上复现，关键环境如下：
+
+- Ubuntu 20.04
+- Python 3.10
+- PyTorch `2.5.1+cu121`
+- NCCL `2.21.5+cuda12.4`
+- NVIDIA Driver `535.230.02`
+- 5 张 NVIDIA GeForce RTX 4090，每张按 24 GB 显存估算
+
+稳定四卡训练默认使用：
 
 ```bash
-conda create -n open_gpt4o python=3.10 -y && conda activate open_gpt4o
-pip install torch==2.5.0 torchvision==0.20.0 torchaudio==2.5.0 --index-url https://download.pytorch.org/whl/cu118
-pip install -e "src/.[train]"
-pip install packaging &&  pip install ninja && pip install flash-attn==2.6.3 --no-build-isolation --no-cache-dir
-pip install -r requirements.txt
+CUDA_VISIBLE_DEVICES=0,2,3,4
 ```
 
-*optional*
-
-- [ChatTTS](https://github.com/2noise/ChatTTS)
-- [CosyVoice](https://github.com/FunAudioLLM/CosyVoice)
-
-### Data Preparation
-
-Download [M4-IT](https://huggingface.co/datasets/ColorfulAI/M4-IT) and organize it in the following format. To enhance audio instruction-following performance, you may also download [VoiceAssistant-400K](https://huggingface.co/datasets/gpt-omni/VoiceAssistant-400K) and sample a portion of this dataset based on your computational resources.
-
-```
-intersuit/inputs        
-    ├── images/ # images
-      └── llava-next/
-        ├── ...
-        └── xxxx.jpg
-    ├── speech/
-      ├── voiceassistant/
-        ├── ...
-        └── xxxx.wav
-      └── interinst/
-        ├── ...
-        └── xxxx.wav
-    └── texts/
-      ├── voiceassistant.json
-      ├── m4-it-qwen.json
-      └── m4-it-qwen-audio.json
-```
-
-### Pretrained Backbone Preparation
-
-Download the pretrained large video language model weights [LongVA-7B](https://huggingface.co/lmms-lab/LongVA-7B) and the pretrained audio encoder weights [Whisper](https://github.com/openai/whisper), and place them in the `intersuit/checkpoints` directory.
-
-```
-intersuit/checkpoints        
-    ├── LongVA-7B-Qwen2
-    └── whisper/large-v3.pt
-```
-
-If you wish to use other LLMs or instruction tuning data, feel free to follow the [LLaVA-NeXT](https://github.com/LLaVA-VL/LLaVA-NeXT) pipeline. Here, we provide a pipeline to do visual instruction tuning on [Llama-3.1-8B](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct/tree/main) using the datasets [blip_laion_cc_sbu_558k](https://huggingface.co/datasets/liuhaotian/LLaVA-Pretrain), [LLaVA-NeXT-Data](https://huggingface.co/datasets/lmms-lab/LLaVA-NeXT-Data), and [ShareGPTVideo](https://huggingface.co/datasets/ShareGPTVideo/train_video_and_instruction). Feel free to adapt it to other models.
+通信友好的三卡组合：
 
 ```bash
-bash lvlm_pretrain.sh
-bash lvlm_finetune.sh
-bash lvlm_dpo.sh
+CUDA_VISIBLE_DEVICES=2,3,4
 ```
 
-### Start Training
+不要默认使用 5 张卡。GPU 1 可用于隔离单卡任务，但在单独完成多卡稳定性验证前，不进入生产多卡训练。
 
-Our training logic is essentially the same as the visual instruction tuning. (The training process takes ~2 hours on 4 NVIDIA A800-80G)
+## 安装
+
+建议使用已有本地 conda 环境：
 
 ```bash
-cd intersuit
-# finetune on m4-it
+conda activate /home/yjm/miniconda3/envs/M4
+cd /home/yjm/M4-main/intersuit
+pip install -e .
+```
+
+如果需要从头安装，可参考原始 M4 README 和 `requirements.txt`。由于本项目依赖 CUDA、FlashAttention、DeepSpeed、Whisper、torchaudio 等组件，版本应优先与本机复现记录保持一致。
+
+## 数据与权重
+
+Git 仓库只跟踪代码、脚本、配置、文档和小型 manifest。以下运行资产不会进入 Git：
+
+- `intersuit/checkpoints/`
+- `intersuit/asset/`
+- `VoiceAssistant-400K/`
+- `m4-it/`
+- `third_party/`
+- 训练日志、缓存、音视频文件、模型权重文件
+
+本地已验证的数据状态：
+
+- `m4-it-qwen.json`：`9963` 条样本。
+- 图像引用：`4052` 个，缺失数 `0`。
+- 生成版音频 JSON：`intersuit/inputs/texts/m4-it-qwen-audio.generated.json`。
+- 生成版音频 JSON 引用唯一 wav：`30188` 个，缺失数 `0`。
+
+审计数据：
+
+```bash
+cd /home/yjm/M4-main/intersuit
+python scripts/audit_m4_data.py
+```
+
+从已有 wav 构建带 `speech` 字段的音频训练 JSON：
+
+```bash
+python scripts/build_m4_audio_json.py
+```
+
+## 训练前检查
+
+启动长训练前必须先检查 GPU 空闲和功率策略：
+
+```bash
+cd /home/yjm/M4-main/intersuit
+python scripts/check_m4_repro_preflight.py
+```
+
+稳定四卡训练推荐环境：
+
+```bash
+CUDA_VISIBLE_DEVICES=0,2,3,4 \
+NCCL_DEBUG=WARN \
+NCCL_P2P_DISABLE=1 \
+NCCL_SHM_DISABLE=1 \
+NCCL_IB_DISABLE=1 \
+TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+```
+
+## M4 基线复现
+
+当前默认保精度训练策略：
+
+```bash
+cd /home/yjm/M4-main/intersuit
+CUDA_VISIBLE_DEVICES=0,2,3,4 \
+NUM_GPUS=4 \
+MODEL_MAX_LENGTH=12288 \
+M4_CHUNKED_LM_LOSS=1 \
+M4_CHUNKED_LM_LOSS_TOKENS=512 \
+M4_CHUNKED_LM_LOSS_CHECKPOINT=0 \
+M4_FREEZE_LM_HEAD=0 \
+DEEPSPEED_CONFIG=scripts/zero3_lowmem.json \
 bash scripts/finetune_m4.sh
-# finetune on m4-it-audio
-bash scripts/finetune_m4_audio.sh
 ```
 
-Before fine-tuning the audio version, you are encouraged to tune the vision-language model on audio instructions to improve the generality of audio understanding. (This process takes ~100 hours on 4 A800 GPU)
+已验证完成的 no-freeze 基线：
+
+| 基线 | 输出目录 | 上下文 | 训练步数 | train_loss |
+| --- | --- | ---: | ---: | ---: |
+| 12k no-freeze | `intersuit/checkpoints/M4-LongVA-7B-Qwen2-train-12k-lowmem-nofreeze` | 12288 | 622/622 | 0.06275078892921938 |
+| 32k no-freeze | `intersuit/checkpoints/M4-LongVA-7B-Qwen2-repro-32k-lowmem-nofreeze-v1` | 32000 | 622/622 | 0.09159564487920577 |
+
+32k 阶段复现入口：
 
 ```bash
-bash scripts/finetune_voiceassistant.sh
+bash scripts/run_m4_32k_repro_stage.sh 16k-canary150
+bash scripts/run_m4_32k_repro_stage.sh 32k-canary20
+bash scripts/run_m4_32k_repro_stage.sh 32k-canary150
+bash scripts/run_m4_32k_repro_stage.sh 32k-full
 ```
 
-To assist those with limited computational resources, we also provide an off-the-shelf checkpoint. Check it out at [![Model](https://img.shields.io/badge/%F0%9F%A4%97Model-LongVA--7B--Qwen2--VoiceAssistant-yellow)](https://huggingface.co/ColorfulAI/LongVA-7B-Qwen2-VoiceAssistant)
+## AS-M4 分阶段训练
 
-To enhance the model's visual-audio understanding capabilities, we offer a script to fine-tune it using the [![Dataset](https://img.shields.io/badge/%F0%9F%A4%97Dataset-LLaVA--NeXT--Speech-yellow)](https://huggingface.co/datasets/ColorfulAI/LLaVA-NeXT-Speech) dataset. This aims to improve visual-audio alignment performance. (This process takes ~140 hours on 4 A800 GPU)
-
-> NOTE: We find that this process is more prone to collapse than audio instruction tuning alone, so we provide a model just for further study.
+12k 快速开发与 canary：
 
 ```bash
-bash scripts/finetune_llavanextaudio.sh
+cd /home/yjm/M4-main/intersuit
+bash scripts/run_as_m4_stage.sh 12k-smoke
+bash scripts/run_as_m4_stage.sh 12k-canary20
+bash scripts/run_as_m4_stage.sh 12k-canary150
+bash scripts/run_as_m4_stage.sh 12k-full
 ```
 
-For those with limited computational resources, we also provide a ready-to-use checkpoint (17500 step). You can access it here [![Model](https://img.shields.io/badge/%F0%9F%A4%97Model-LongVA--7B--Qwen2--Audio-yellow)](https://huggingface.co/ColorfulAI/LongVA-7B-Qwen2-Audio)
-
-Try the visual-audio base model through `python -m local_demo.baseline_audio_cli --video_path local_demo/assets/water.mp4 --question_audio "local_demo/wav/water.mp4.wav"`
-
-## Usage
-
-Currently, we only provide a demo, but you are welcome to deploy it using your preferred framework.
-
-(i) attention-based proactive reasoning
+32k 长上下文阶段：
 
 ```bash
-cd intersuit
-python -m local_demo.proactive_cli  --model_path M4-LongVA-Qwen-7B --frame_fps 1 --video_file local_demo/assets/water.mp4
+bash scripts/run_as_m4_32k_stage.sh 32k-canary20
+bash scripts/run_as_m4_32k_stage.sh 32k-canary150
+bash scripts/run_as_m4_32k_stage.sh 32k-full
 ```
 
-(ii) multiplexing modeling
-
-*text input*
+AS-M4 默认关键环境变量：
 
 ```bash
-cd intersuit
-# new valid query
-python -m local_demo.turntaking_cli --video_path local_demo/assets/water.mp4 --question "Can you describe the video?" --new_query "How many people in the video?" --new_query_pos 20
-# new interrupt query
-python -m local_demo.turntaking_cli --video_path local_demo/assets/water.mp4 --question "Can you describe the video?" --new_query "Sorry to interrupt?" --new_query_pos 20
-# new noise query
-python -m local_demo.turntaking_cli --video_path local_demo/assets/water.mp4 --question "Can you describe the video?" --new_query "Okay, I see." --new_query_pos 20
+AS_M4_ENABLE_SCENE_AUDIO=1
+AS_M4_SCENE_AUDIO_ENCODER_TYPE=dummy
+AS_M4_STREAMING_AV_LR=1e-4
+AS_M4_SCENE_AUDIO_PROJECTOR_LR=1e-4
+MM_TUNABLE_PARTS=mm_vision_tower,mm_mlp_adapter,mm_language_model,streaming_av_module
 ```
 
-*audio input*
+## 行为回退验证
 
-For better visualization, you can input text, and ChatTTS will automatically convert it into audio. You can then find the generated audio in `local_demo/wav`.
+完全关闭场景音频路径：
 
 ```bash
-cd intersuit
-# new valid query
-python -m local_demo.turntaking_audio_cli --video_path local_demo/assets/water.mp4 --question "Can you describe the video?" --new_query "How many people in the video?" --new_query_pos 20
-# new interrupt query
-python -m local_demo.turntaking_audio_cli --video_path local_demo/assets/water.mp4 --question "Can you describe the video?" --new_query "Sorry to interrupt?" --new_query_pos 20
-# new noise query
-python -m local_demo.turntaking_audio_cli --video_path local_demo/assets/water.mp4 --question "Can you describe the video?" --new_query "Okay, I see." --new_query_pos 20
+AS_M4_ENABLE_SCENE_AUDIO=0 \
+MM_TUNABLE_PARTS=mm_vision_tower,mm_mlp_adapter,mm_language_model \
+bash scripts/run_as_m4_stage.sh 12k-smoke
 ```
 
-or you can specify the audio
+保留编码/对齐链路，但强制残差门控为 0：
 
 ```bash
-cd intersuit
-python -m local_demo.turntaking_audio_cli --video_path local_demo/assets/water.mp4 --question_audio "XXX.wav" --new_query_audio "XXX.wav" --new_query_pos 20
+AS_M4_ENABLE_SCENE_AUDIO=1 \
+AS_M4_FORCE_AUDIO_GATE=0 \
+bash scripts/run_as_m4_stage.sh 12k-smoke
 ```
 
-## Evaluation
+权重回退不要依赖“冻结模块”。如果要恢复原模型能力，必须显式加载保留的原始 M4、12k no-freeze 或 32k no-freeze checkpoint。
 
-To evaluate the interaction ability of **M4** in streaming video contexts, you are encouraged to try our [OmniMMI](https://github.com/bigai-nlco/OmniMMI)!
+## 测试
 
-## Roadmap
+AS-M4 新增模块对应测试位于 `intersuit/tests/`：
 
-- [x] This work does not cover audio decoding. I am working on an end-to-end interactive omni-language model (visual/speech-to-speech) and actively seeking additional computational resources😞. *However, for those lacking computational resources too, I believe a streaming TTS could serve as an alternative without significant delay.* 
-
-**Check [Open-Omni-Nexus](https://github.com/patrick-tssn/Open-Omni-Nexus)!**
-
-## Acknowledgement
-
-We Thank [LLaVA-NeXT](https://github.com/LLaVA-VL/LLaVA-NeXT), [LongVA](https://github.com/EvolvingLMMs-Lab/LongVA), [videollm-online](https://github.com/showlab/videollm-online), [LLaMA-Omni](https://github.com/ictnlp/LLaMA-Omni) for open-sourcing their work.
-
-## Citation
-
-If you find our work helpful, please consider citing it.
-
-```bibtex
-@article{omnimmi,
-    title={OmniMMI: A Comprehensive Multi-modal Interaction Benchmark in Streaming Video Contexts},
-    author={Wang, Yuxuan and Wang, Yueqian and Chen, Bo and Wu, Tong and Zhao, Dongyan and Zheng, Zilong},
-    journal={arxiv},
-    year={2025}
-}
+```bash
+cd /home/yjm/M4-main/intersuit
+pytest tests/test_audio_stream.py
+pytest tests/test_av_buffer.py
+pytest tests/test_event_detector.py
+pytest tests/test_temporal_aligner.py
+pytest tests/test_confidence_gate.py
+pytest tests/test_fusion.py
+pytest tests/test_streaming_av_integration.py
+pytest tests/test_dataset_collator.py
 ```
+
+如果环境中没有 pytest，可先用 Python 编译检查关键模块：
+
+```bash
+python -m py_compile \
+  intersuit/model/scene_audio_encoder/scene_audio_encoder.py \
+  intersuit/model/streaming_av/event_detector.py \
+  intersuit/model/streaming_av/temporal_aligner.py \
+  intersuit/model/streaming_av/confidence_gate.py \
+  intersuit/model/streaming_av/fusion.py
+```
+
+## Demo
+
+原 M4 demo 仍保留：
+
+```bash
+cd /home/yjm/M4-main/intersuit
+./scripts/run_demos_stable.sh turntaking-valid
+./scripts/run_demos_stable.sh turntaking-interrupt
+./scripts/run_demos_stable.sh turntaking-noise
+./scripts/run_demos_stable.sh proactive
+./scripts/run_audio_demos_stable.sh baseline-audio-file
+./scripts/run_audio_demos_stable.sh turntaking-audio-file
+```
+
+## Git 提交规则
+
+每次完成重大设计变更、模块新增、模块删除或核心模块改动后，都要及时提交一次 Git commit，并推送到对应 GitHub 仓库。提交前必须确认没有把 checkpoint、权重、数据集、缓存、训练日志等运行资产加入 Git。
+
+当前远端仓库：
+
+```bash
+git@github.com:Yolene-star/AS-M4.git
+```
+
+## 参考
+
+- 原始 M4 README：[`README_M4_ORIGINAL.md`](README_M4_ORIGINAL.md)
+- M4 架构中文说明：[`docs/M4_architecture_zh.md`](docs/M4_architecture_zh.md)
+- 本地复现状态：[`REPRODUCTION_STATUS.md`](REPRODUCTION_STATUS.md)
+- AS-M4 实现手册：[`AS_M4_CODEX_IMPLEMENTATION_PLAYBOOK.md`](AS_M4_CODEX_IMPLEMENTATION_PLAYBOOK.md)
+
