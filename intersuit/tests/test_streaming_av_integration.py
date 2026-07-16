@@ -93,6 +93,28 @@ def test_debug_residual_scale_zero_recovers_video_with_live_gate():
     assert diagnostics["delta_to_video_ratio"].item() == 0.0
 
 
+def test_gate_zero_remains_exactly_zero_with_cap():
+    model = DummyStreamingModel(fusion_init="identity")
+    video = torch.randn(2, 3, 4)
+
+    fused = model.fuse_scene_audio_into_image_features(
+        [video],
+        ["video"],
+        _scene_output(),
+        scene_audio_timestamps=torch.tensor([[[0.0, 1.0], [1.0, 2.0]]]),
+        frame_timestamps=torch.tensor([[0.5, 1.5]]),
+        force_audio_gate=0.0,
+        audio_delta_ratio_cap=0.03,
+    )[0]
+
+    diagnostics = model._last_streaming_av_diagnostics[0]
+    assert torch.equal(fused, video)
+    assert diagnostics["gate_mean"].item() == 0.0
+    assert diagnostics["raw_delta_norm"].item() == 0.0
+    assert diagnostics["delta_norm"].item() == 0.0
+    assert diagnostics["delta_to_video_ratio"].item() == 0.0
+
+
 def test_non_video_features_pass_through_unchanged():
     model = DummyStreamingModel()
     image = torch.randn(1, 3, 4)

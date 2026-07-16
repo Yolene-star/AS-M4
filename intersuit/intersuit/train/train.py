@@ -115,6 +115,9 @@ class ModelArguments:
     max_av_offset_sec: Optional[float] = field(default=1.5)
     av_similarity_chunk_size: Optional[int] = field(default=None)
     force_audio_gate: Optional[float] = field(default=None)
+    audio_delta_ratio_cap: float = field(default=0.0)
+    as_m4_fusion_init: str = field(default="zero")
+    as_m4_gate_logit_bias: float = field(default=-5.0)
 
     rope_scaling_factor: Optional[float] = field(default=None)
     rope_scaling_type: Optional[str] = field(default=None)

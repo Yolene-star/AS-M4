@@ -28,6 +28,7 @@ class AudioConfidenceGate(nn.Module):
         hidden_size: int,
         quality_dim: int = 0,
         hidden_dim: int | None = None,
+        gate_logit_bias: float = -5.0,
     ) -> None:
         super().__init__()
         if hidden_size <= 0:
@@ -37,6 +38,7 @@ class AudioConfidenceGate(nn.Module):
         hidden = int(hidden_dim or max(32, min(512, hidden_size)))
         self.hidden_size = int(hidden_size)
         self.quality_dim = int(quality_dim)
+        self.gate_logit_bias = float(gate_logit_bias)
 
         quality_input_dim = hidden_size + self.quality_dim
         relevance_input_dim = hidden_size * 3 + 2
@@ -119,8 +121,8 @@ class AudioConfidenceGate(nn.Module):
             )
             relevance_logits = self.relevance_mlp(relevance_input).squeeze(-1) + relevance_hint
 
-            q = torch.sigmoid(quality_logits)
-            r = torch.sigmoid(relevance_logits)
+            q = torch.sigmoid(quality_logits + self.gate_logit_bias)
+            r = torch.sigmoid(relevance_logits + self.gate_logit_bias)
             gate = q * r
         return AudioConfidenceGateOutput(
             quality=q,

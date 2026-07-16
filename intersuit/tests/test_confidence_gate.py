@@ -73,10 +73,18 @@ def test_gate_is_not_saturated_for_clean_audio():
     assert 0.0 < output.gate.item() < 1.0
 
 
+def test_default_gate_starts_nearly_closed_for_clean_audio():
+    gate = AudioConfidenceGate(hidden_size=4, quality_dim=1)
+    audio = torch.ones(1, 1, 4) * 0.25
+    output = gate(audio, audio, quality_features=torch.ones(1, 1, 1))
+
+    assert 0.0 < output.gate.item() < 0.02
+
+
 if __name__ == "__main__":
     test_gate_outputs_are_in_unit_interval()
     test_clean_audio_gate_is_higher_than_bad_audio()
     test_alignment_confidence_affects_relevance()
     test_gate_is_not_saturated_for_clean_audio()
+    test_default_gate_starts_nearly_closed_for_clean_audio()
     print("confidence_gate harness passed")
-

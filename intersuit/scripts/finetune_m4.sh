@@ -94,6 +94,11 @@ fi
 if [ -n "${AS_M4_FORCE_AUDIO_GATE:-}" ]; then
     EXTRA_TRAIN_ARGS+=(--force_audio_gate "${AS_M4_FORCE_AUDIO_GATE}")
 fi
+if [ -n "${AS_M4_AUDIO_DELTA_RATIO_CAP:-}" ]; then
+    EXTRA_TRAIN_ARGS+=(--audio_delta_ratio_cap "${AS_M4_AUDIO_DELTA_RATIO_CAP}")
+fi
+EXTRA_TRAIN_ARGS+=(--as_m4_fusion_init "${AS_M4_FUSION_INIT:-zero}")
+EXTRA_TRAIN_ARGS+=(--as_m4_gate_logit_bias "${AS_M4_GATE_LOGIT_BIAS:--5.0}")
 
 if command -v module >/dev/null 2>&1; then
     module add cuda11.8

@@ -28,6 +28,7 @@ from .speech_encoder.builder import build_speech_encoder
 from .speech_projector.builder import  build_speech_projector
 from .scene_audio_encoder.builder import build_scene_audio_encoder
 from .streaming_av.builder import build_streaming_av_module
+from .streaming_av.fusion import apply_audio_delta_ratio_cap
 
 from intersuit.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from intersuit.constants import SPEECH_TOKEN_INDEX, DEFAULT_SPEECH_TOKEN
@@ -188,6 +189,7 @@ class LlavaMetaModel:
         self.config.max_av_offset_sec = getattr(model_args, "max_av_offset_sec", 1.5)
         self.config.av_similarity_chunk_size = getattr(model_args, "av_similarity_chunk_size", None)
         self.config.force_audio_gate = getattr(model_args, "force_audio_gate", None)
+        self.config.audio_delta_ratio_cap = getattr(model_args, "audio_delta_ratio_cap", 0.0)
         self.config.enable_scene_audio = getattr(model_args, "enable_scene_audio", True)
         self.config.as_m4_fusion_init = getattr(model_args, "as_m4_fusion_init", "zero")
         self.config.as_m4_gate_logit_bias = getattr(model_args, "as_m4_gate_logit_bias", -5.0)
@@ -345,6 +347,7 @@ class LlavaMetaForCausalLM(ABC):
         lookahead_sec=0.0,
         force_audio_gate=None,
         audio_residual_scale=1.0,
+        audio_delta_ratio_cap=0.0,
     ):
         """Fuse scene audio into per-frame video features before flattening.
 
@@ -426,11 +429,19 @@ class LlavaMetaForCausalLM(ABC):
 
             audio_delta = streaming_av_module.fusion.audio_delta(frame_audio)
             gated_delta = float(audio_residual_scale) * gate.to(dtype=audio_delta.dtype).view(audio_delta.shape[0], audio_delta.shape[1], 1, 1) * audio_delta.unsqueeze(2)
-            video_norm = video.detach().float().norm()
+            capped_delta, cap_diagnostics = apply_audio_delta_ratio_cap(
+                video,
+                gated_delta,
+                ratio_cap=audio_delta_ratio_cap,
+            )
+            video_norm = cap_diagnostics["video_norm"][0]
             audio_norm = frame_audio.detach().float().norm()
-            delta_norm = gated_delta.detach().float().norm()
-            delta_to_video_ratio = delta_norm / video_norm.clamp_min(1e-12)
-            fused = streaming_av_module.fusion(video, frame_audio, gate, residual_scale=audio_residual_scale)
+            raw_delta_norm = cap_diagnostics["raw_delta_norm"][0]
+            raw_delta_to_video_ratio = cap_diagnostics["raw_delta_to_video_ratio"][0]
+            audio_delta_applied_scale = cap_diagnostics["audio_delta_applied_scale"][0]
+            capped_delta_norm = cap_diagnostics["capped_delta_norm"][0]
+            capped_delta_to_video_ratio = cap_diagnostics["capped_delta_to_video_ratio"][0]
+            fused = video + capped_delta
             fused_features.append(fused.squeeze(0))
             diagnostics.append(
                 {
@@ -444,8 +455,16 @@ class LlavaMetaForCausalLM(ABC):
                     "gate_min": gate.detach().float().min(),
                     "video_norm": video_norm,
                     "audio_norm": audio_norm,
-                    "delta_norm": delta_norm,
-                    "delta_to_video_ratio": delta_to_video_ratio,
+                    # Backward-compatible fields explicitly represent the
+                    # residual after the optional ratio cap.
+                    "delta_norm": capped_delta_norm,
+                    "delta_to_video_ratio": capped_delta_to_video_ratio,
+                    "raw_delta_norm": raw_delta_norm,
+                    "raw_delta_to_video_ratio": raw_delta_to_video_ratio,
+                    "audio_delta_cap": float(audio_delta_ratio_cap),
+                    "audio_delta_applied_scale": audio_delta_applied_scale,
+                    "capped_delta_norm": capped_delta_norm,
+                    "capped_delta_to_video_ratio": capped_delta_to_video_ratio,
                     "audio_residual_scale": float(audio_residual_scale),
                 }
             )
@@ -933,6 +952,7 @@ class LlavaMetaForCausalLM(ABC):
             lookahead_sec=getattr(self.config, "streaming_av_lookahead_sec", 0.0),
             force_audio_gate=getattr(self.config, "force_audio_gate", None),
             audio_residual_scale=getattr(self.config, "debug_audio_residual_scale", 1.0),
+            audio_delta_ratio_cap=getattr(self.config, "audio_delta_ratio_cap", 0.0),
         )
 
         mm_patch_merge_type = getattr(self.config, "mm_patch_merge_type", "flat")

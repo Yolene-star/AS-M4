@@ -1,0 +1,65 @@
+{
+  "baseline_version": 1,
+  "recorded_at": "2026-07-17",
+  "scope": "固定 5 条 AVUT muted-only smoke 样本；仅作为回归基线，不代表统计显著性或性能提升。",
+  "manifest": "intersuit/inputs/texts/avut/avut_audio_smoke.json",
+  "config": "intersuit/harness/configs/as_m4_avut_e0_e1_e7_smoke.json",
+  "candidate_audio_delta_ratio_cap": 0.03,
+  "default_audio_delta_ratio_cap": 0.0,
+  "generation": {
+    "do_sample": false,
+    "max_new_tokens": 48,
+    "random_seed": 20260716,
+    "video_max_frames": 32
+  },
+  "checkpoints": {
+    "E0": "intersuit/checkpoints/M4-LongVA-7B-Qwen2-train-12k-lowmem-nofreeze",
+    "E1": "intersuit/checkpoints/AS-M4-12kbase-canary150-after-e0e1e7-20260716",
+    "E7": "intersuit/checkpoints/AS-M4-12kbase-canary150-after-e0e1e7-20260716"
+  },
+  "source_prediction_sha256": {
+    "E0": "cab69bdc2761e22465c02c9ae99f2a04d09797c60acf38b88a802d4d2c7185c5",
+    "E1_cap003": "e9aa3a5d49ddd1d3332b327a12abec415fd0b85b1d58aa9f9b168b5243c56af5",
+    "E7": "1b549cbc1d286790fb9c9247aa7f0ac1345f8bd91980681dce8317c8dfbf4563"
+  },
+  "summary": {
+    "sample_count": 5,
+    "E0_accuracy": 0.4,
+    "E1_cap003_accuracy": 0.4,
+    "E1_cap003_strict_single_letter_rate": 1.0,
+    "E7_accuracy": 0.4,
+    "E0_E7_prediction_match_rate": 1.0
+  },
+  "samples": [
+    {
+      "sample_id": "avut_0141",
+      "E0": {"prediction": "B", "correct": false},
+      "E1_cap003": {"prediction": "A", "correct": false, "raw_delta_to_video_ratio": 0.06437785923480988, "capped_delta_to_video_ratio": 0.02999846264719963},
+      "E7": {"prediction": "B", "correct": false, "gate": 0.0, "delta_to_video_ratio": 0.0}
+    },
+    {
+      "sample_id": "avut_0199",
+      "E0": {"prediction": "A", "correct": false},
+      "E1_cap003": {"prediction": "A", "correct": false, "raw_delta_to_video_ratio": 0.027399366721510887, "capped_delta_to_video_ratio": 0.027399366721510887},
+      "E7": {"prediction": "A", "correct": false, "gate": 0.0, "delta_to_video_ratio": 0.0}
+    },
+    {
+      "sample_id": "avut_0686",
+      "E0": {"prediction": "B", "correct": false},
+      "E1_cap003": {"prediction": "B", "correct": false, "raw_delta_to_video_ratio": 0.010704779997467995, "capped_delta_to_video_ratio": 0.010704779997467995},
+      "E7": {"prediction": "B", "correct": false, "gate": 0.0, "delta_to_video_ratio": 0.0}
+    },
+    {
+      "sample_id": "avut_0967",
+      "E0": {"prediction": "B", "correct": true},
+      "E1_cap003": {"prediction": "B", "correct": true, "raw_delta_to_video_ratio": 0.02629994787275791, "capped_delta_to_video_ratio": 0.02629994787275791},
+      "E7": {"prediction": "B", "correct": true, "gate": 0.0, "delta_to_video_ratio": 0.0}
+    },
+    {
+      "sample_id": "avut_0196",
+      "E0": {"prediction": "B", "correct": true},
+      "E1_cap003": {"prediction": "B", "correct": true, "raw_delta_to_video_ratio": 0.02883172407746315, "capped_delta_to_video_ratio": 0.02883172407746315},
+      "E7": {"prediction": "B", "correct": true, "gate": 0.0, "delta_to_video_ratio": 0.0}
+    }
+  ]
+}

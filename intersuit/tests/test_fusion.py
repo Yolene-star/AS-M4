@@ -17,6 +17,7 @@ sys.modules[SPEC.name] = fusion
 SPEC.loader.exec_module(fusion)
 
 GatedAVFusion = fusion.GatedAVFusion
+apply_audio_delta_ratio_cap = fusion.apply_audio_delta_ratio_cap
 
 
 def test_fusion_preserves_video_token_shape():
@@ -115,6 +116,63 @@ def test_debug_residual_scale_defaults_to_one_and_scales_delta():
     assert torch.equal(default, explicit_one)
     assert torch.allclose(half, default * 0.5)
     assert torch.equal(zero, video)
+
+
+def test_audio_delta_cap_disabled_is_exact_noop():
+    video = torch.randn(2, 3, 5, 4)
+    raw_delta = torch.randn(2, 3, 1, 4)
+
+    capped, diagnostics = apply_audio_delta_ratio_cap(video, raw_delta, ratio_cap=0.0)
+
+    assert capped is raw_delta
+    assert torch.equal(capped, raw_delta)
+    assert torch.equal(diagnostics["audio_delta_applied_scale"], torch.ones(2))
+
+
+def test_audio_delta_below_cap_is_unchanged():
+    video = torch.ones(1, 2, 3, 4)
+    raw_delta = torch.ones(1, 2, 1, 4) * 0.01
+
+    capped, diagnostics = apply_audio_delta_ratio_cap(video, raw_delta, ratio_cap=0.5)
+
+    assert torch.equal(capped, raw_delta)
+    assert diagnostics["audio_delta_applied_scale"].item() == 1.0
+
+
+def test_audio_delta_above_cap_is_limited():
+    video = torch.ones(1, 2, 3, 4)
+    raw_delta = torch.ones(1, 2, 1, 4)
+
+    capped, diagnostics = apply_audio_delta_ratio_cap(video, raw_delta, ratio_cap=0.1)
+
+    assert diagnostics["audio_delta_applied_scale"].item() < 1.0
+    assert diagnostics["capped_delta_to_video_ratio"].item() <= 0.1 + 1e-6
+    assert not torch.equal(capped, raw_delta)
+
+
+def test_audio_delta_cap_preserves_zero_delta():
+    video = torch.zeros(1, 2, 3, 4)
+    raw_delta = torch.zeros(1, 2, 1, 4)
+
+    capped, diagnostics = apply_audio_delta_ratio_cap(video, raw_delta, ratio_cap=0.1)
+
+    assert torch.equal(capped, raw_delta)
+    assert diagnostics["raw_delta_to_video_ratio"].item() == 0.0
+    assert diagnostics["capped_delta_to_video_ratio"].item() == 0.0
+
+
+def test_audio_delta_cap_has_no_nan_or_inf():
+    video = torch.randn(2, 2, 3, 4, dtype=torch.bfloat16)
+    raw_delta = torch.randn(2, 2, 1, 4, dtype=torch.bfloat16)
+
+    capped, diagnostics = apply_audio_delta_ratio_cap(video, raw_delta, ratio_cap=0.03)
+
+    assert capped.dtype == torch.bfloat16
+    assert torch.isfinite(capped).all()
+    assert torch.all(diagnostics["capped_delta_to_video_ratio"] <= 0.03 + 1e-6)
+    for value in diagnostics.values():
+        if torch.is_tensor(value):
+            assert torch.isfinite(value).all()
 
 
 if __name__ == "__main__":

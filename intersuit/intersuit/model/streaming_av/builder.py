@@ -20,6 +20,8 @@ class StreamingAVModule(nn.Module):
         quality_dim = int(getattr(config, "audio_quality_dim", 1))
         align_dim = int(getattr(config, "streaming_av_align_dim", hidden_size))
         max_offset_sec = float(getattr(config, "max_av_offset_sec", 1.5))
+        gate_logit_bias = float(getattr(config, "as_m4_gate_logit_bias", -5.0))
+        fusion_init = str(getattr(config, "as_m4_fusion_init", "zero"))
 
         self.event_detector = AudioEventDetector(hidden_size, num_events)
         self.temporal_aligner = CausalTemporalAligner(
@@ -28,10 +30,9 @@ class StreamingAVModule(nn.Module):
             max_offset_sec=max_offset_sec,
             similarity_chunk_size=getattr(config, "av_similarity_chunk_size", None),
         )
-        self.confidence_gate = AudioConfidenceGate(hidden_size, quality_dim=quality_dim)
-        self.fusion = GatedAVFusion(hidden_size)
+        self.confidence_gate = AudioConfidenceGate(hidden_size, quality_dim=quality_dim, gate_logit_bias=gate_logit_bias)
+        self.fusion = GatedAVFusion(hidden_size, fusion_init=fusion_init)
 
 
 def build_streaming_av_module(config) -> StreamingAVModule:
     return StreamingAVModule(config)
-

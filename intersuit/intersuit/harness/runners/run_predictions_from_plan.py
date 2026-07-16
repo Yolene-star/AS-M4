@@ -541,6 +541,7 @@ def model_prediction(
     previous_force_audio_gate = getattr(model.config, "force_audio_gate", None)
     previous_enable_scene_audio = getattr(model.config, "enable_scene_audio", None)
     previous_residual_scale = getattr(model.config, "debug_audio_residual_scale", 1.0)
+    previous_delta_ratio_cap = getattr(model.config, "audio_delta_ratio_cap", 0.0)
     if force_audio_gate is not None:
         model.config.force_audio_gate = float(force_audio_gate)
     if enable_scene_audio is not None:
@@ -548,6 +549,9 @@ def model_prediction(
     residual_scale = exp.get("env", {}).get("AS_M4_DEBUG_AUDIO_RESIDUAL_SCALE")
     active_residual_scale = float(residual_scale) if residual_scale is not None else 1.0
     model.config.debug_audio_residual_scale = active_residual_scale
+    delta_ratio_cap = exp.get("env", {}).get("AS_M4_AUDIO_DELTA_RATIO_CAP")
+    active_delta_ratio_cap = float(delta_ratio_cap) if delta_ratio_cap is not None else 0.0
+    model.config.audio_delta_ratio_cap = active_delta_ratio_cap
     frame_timestamps_arg = None
     if using_video_feature and qa.get("frame_timestamps") is not None:
         frame_timestamps_arg = torch.as_tensor(qa.get("frame_timestamps") or [], dtype=torch.float32, device=device).unsqueeze(0)
@@ -638,6 +642,7 @@ def model_prediction(
             if previous_enable_scene_audio is not None:
                 model.config.enable_scene_audio = previous_enable_scene_audio
             model.config.debug_audio_residual_scale = previous_residual_scale
+            model.config.audio_delta_ratio_cap = previous_delta_ratio_cap
     diagnostics = None
     if dump_diagnostics:
         diagnostics = jsonable_diagnostics(getattr(model, "_last_streaming_av_diagnostics", None))
@@ -654,6 +659,7 @@ def model_prediction(
     )
     token_debug["audio_input"] = audio_input_debug
     token_debug["audio_residual_scale"] = active_residual_scale
+    token_debug["audio_delta_ratio_cap"] = active_delta_ratio_cap
     token_debug["first_token_logits"] = first_token_logits
     return prediction, diagnostics, {"prompt": prompt_debug, "tokens": token_debug}
 
@@ -733,6 +739,9 @@ def run_predictions(
                 row["quality_gate"] = first_diagnostic_scalar(diagnostics, "quality_gate")
                 row["relevance_gate"] = first_diagnostic_scalar(diagnostics, "relevance_gate")
                 row["delta_to_video_ratio"] = first_diagnostic_scalar(diagnostics, "delta_to_video_ratio")
+                row["raw_delta_to_video_ratio"] = first_diagnostic_scalar(diagnostics, "raw_delta_to_video_ratio")
+                row["audio_delta_applied_scale"] = first_diagnostic_scalar(diagnostics, "audio_delta_applied_scale")
+                row["capped_delta_to_video_ratio"] = first_diagnostic_scalar(diagnostics, "capped_delta_to_video_ratio")
                 row["audio_norm"] = first_diagnostic_scalar(diagnostics, "audio_norm")
                 row["generation_debug"] = generation_debug
                 if generation_debug is not None:
