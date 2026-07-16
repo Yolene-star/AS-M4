@@ -118,6 +118,9 @@ class ModelArguments:
     audio_delta_ratio_cap: float = field(default=0.0)
     as_m4_fusion_init: str = field(default="zero")
     as_m4_gate_logit_bias: float = field(default=-5.0)
+    enable_audio_confidence_gate_v1: bool = field(default=False)
+    audio_gate_silence_threshold: float = field(default=1e-4)
+    audio_gate_rms_reference: float = field(default=0.05)
 
     rope_scaling_factor: Optional[float] = field(default=None)
     rope_scaling_type: Optional[str] = field(default=None)

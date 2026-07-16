@@ -28,6 +28,7 @@ from .speech_encoder.builder import build_speech_encoder
 from .speech_projector.builder import  build_speech_projector
 from .scene_audio_encoder.builder import build_scene_audio_encoder
 from .streaming_av.builder import build_streaming_av_module
+from .streaming_av.confidence_gate import AudioSignalFeatures, compute_audio_signal_features
 from .streaming_av.fusion import apply_audio_delta_ratio_cap
 
 from intersuit.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
@@ -193,6 +194,13 @@ class LlavaMetaModel:
         self.config.enable_scene_audio = getattr(model_args, "enable_scene_audio", True)
         self.config.as_m4_fusion_init = getattr(model_args, "as_m4_fusion_init", "zero")
         self.config.as_m4_gate_logit_bias = getattr(model_args, "as_m4_gate_logit_bias", -5.0)
+        self.config.enable_audio_confidence_gate_v1 = getattr(
+            model_args, "enable_audio_confidence_gate_v1", False
+        )
+        self.config.audio_gate_silence_threshold = getattr(
+            model_args, "audio_gate_silence_threshold", 1e-4
+        )
+        self.config.audio_gate_rms_reference = getattr(model_args, "audio_gate_rms_reference", 0.05)
 
         if self.get_scene_audio_encoder() is None:
             scene_audio_encoder = build_scene_audio_encoder(self.config)
@@ -265,6 +273,19 @@ def _timestamps_to_centers(timestamps, batch_idx, steps, device, dtype):
         pad = torch.arange(centers.numel(), steps, device=device, dtype=dtype)
         centers = torch.cat([centers, pad], dim=0)
     return centers[:steps].unsqueeze(0)
+
+
+def _pool_question_text_features(embed_tokens, input_ids, attention_mask=None):
+    """Mean-pool valid prompt token embeddings without embedding MM sentinels."""
+
+    valid = input_ids.ge(0)
+    if attention_mask is not None:
+        valid = valid & attention_mask.to(device=input_ids.device, dtype=torch.bool)
+    safe_ids = input_ids.masked_fill(~valid, 0)
+    token_features = embed_tokens(safe_ids)
+    weights = valid.to(device=token_features.device, dtype=token_features.dtype).unsqueeze(-1)
+    pooled = (token_features * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)
+    return torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 class LlavaMetaForCausalLM(ABC):
@@ -348,6 +369,8 @@ class LlavaMetaForCausalLM(ABC):
         force_audio_gate=None,
         audio_residual_scale=1.0,
         audio_delta_ratio_cap=0.0,
+        question_features=None,
+        scene_audio_signal_features=None,
     ):
         """Fuse scene audio into per-frame video features before flattening.
 
@@ -416,11 +439,35 @@ class LlavaMetaForCausalLM(ABC):
             frame_eventness = (weights_t * frame_eventness).sum(dim=-1, keepdim=True) / denom
             frame_eventness = torch.nan_to_num(frame_eventness, nan=0.0, posinf=1.0, neginf=0.0)
 
+            frame_question = None
+            frame_signal = None
+            frame_offset = None
+            if streaming_av_module.confidence_gate.enable_v1:
+                if question_features is not None and idx < question_features.shape[0]:
+                    frame_question = question_features[idx : idx + 1]
+                if scene_audio_signal_features is not None:
+                    def align_scalar(values):
+                        sample_values = values[idx : idx + 1].to(device=feature.device, dtype=audio.dtype)
+                        return (weights_t * sample_values.unsqueeze(1)).sum(dim=-1) / denom.squeeze(-1)
+
+                    frame_signal = AudioSignalFeatures(
+                        rms=align_scalar(scene_audio_signal_features.rms),
+                        loudness_dbfs=align_scalar(scene_audio_signal_features.loudness_dbfs),
+                        silence_ratio=align_scalar(scene_audio_signal_features.silence_ratio),
+                        norm=align_scalar(scene_audio_signal_features.norm),
+                    )
+                frame_offset = (weights_t * align_output.offset_sec.to(dtype=audio.dtype).unsqueeze(1)).sum(
+                    dim=-1
+                ) / denom.squeeze(-1)
+
             gate_output = streaming_av_module.confidence_gate(
                 frame_audio,
                 video_summary,
+                question_feature=frame_question,
                 quality_features=frame_eventness,
                 alignment_confidence=frame_confidence,
+                signal_features=frame_signal,
+                offset_sec=frame_offset,
             )
             gate = gate_output.gate
             if force_audio_gate is not None:
@@ -468,6 +515,22 @@ class LlavaMetaForCausalLM(ABC):
                     "audio_residual_scale": float(audio_residual_scale),
                 }
             )
+            if streaming_av_module.confidence_gate.enable_v1:
+                gate_v1_diagnostics = streaming_av_module.confidence_gate.last_v1_diagnostics
+                diagnostics[-1].update(
+                    {
+                        "gate_v1_enabled": True,
+                        "audio_rms": gate_v1_diagnostics["audio_rms"].detach(),
+                        "audio_loudness_dbfs": gate_v1_diagnostics["audio_loudness_dbfs"].detach(),
+                        "silence_ratio": gate_v1_diagnostics["silence_ratio"].detach(),
+                        "audio_input_norm": gate_v1_diagnostics["audio_norm"].detach(),
+                        "question_audio_similarity": gate_v1_diagnostics["question_similarity"].detach(),
+                        "offset_confidence": frame_confidence.detach(),
+                        "offset_score": gate_v1_diagnostics["offset_score"].detach(),
+                        "v1_quality_factor": gate_v1_diagnostics["v1_quality_factor"].detach(),
+                        "v1_relevance_factor": gate_v1_diagnostics["v1_relevance_factor"].detach(),
+                    }
+                )
         self._last_streaming_av_diagnostics = diagnostics
         return fused_features
 
@@ -937,6 +1000,21 @@ class LlavaMetaForCausalLM(ABC):
             split_sizes = [image.shape[0] for image in images_list]
             image_features = self.encode_multimodals(concat_images, video_idx_in_batch, split_sizes)
 
+        enable_gate_v1 = bool(getattr(self.config, "enable_audio_confidence_gate_v1", False))
+        question_features = None
+        scene_audio_signal_features = None
+        if enable_gate_v1:
+            question_features = _pool_question_text_features(
+                self.get_model().embed_tokens,
+                input_ids,
+                attention_mask,
+            )
+            scene_audio_signal_features = compute_audio_signal_features(
+                scene_audios,
+                sample_mask=scene_audio_mask,
+                silence_threshold=float(getattr(self.config, "audio_gate_silence_threshold", 1e-4)),
+            )
+
         scene_audio_output = self.encode_scene_audio(
             scene_audios,
             scene_audio_mask=scene_audio_mask,
@@ -953,6 +1031,8 @@ class LlavaMetaForCausalLM(ABC):
             force_audio_gate=getattr(self.config, "force_audio_gate", None),
             audio_residual_scale=getattr(self.config, "debug_audio_residual_scale", 1.0),
             audio_delta_ratio_cap=getattr(self.config, "audio_delta_ratio_cap", 0.0),
+            question_features=question_features,
+            scene_audio_signal_features=scene_audio_signal_features,
         )
 
         mm_patch_merge_type = getattr(self.config, "mm_patch_merge_type", "flat")

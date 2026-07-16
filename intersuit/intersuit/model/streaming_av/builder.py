@@ -21,6 +21,9 @@ class StreamingAVModule(nn.Module):
         align_dim = int(getattr(config, "streaming_av_align_dim", hidden_size))
         max_offset_sec = float(getattr(config, "max_av_offset_sec", 1.5))
         gate_logit_bias = float(getattr(config, "as_m4_gate_logit_bias", -5.0))
+        enable_gate_v1 = bool(getattr(config, "enable_audio_confidence_gate_v1", False))
+        silence_threshold = float(getattr(config, "audio_gate_silence_threshold", 1e-4))
+        rms_reference = float(getattr(config, "audio_gate_rms_reference", 0.05))
         fusion_init = str(getattr(config, "as_m4_fusion_init", "zero"))
 
         self.event_detector = AudioEventDetector(hidden_size, num_events)
@@ -30,7 +33,15 @@ class StreamingAVModule(nn.Module):
             max_offset_sec=max_offset_sec,
             similarity_chunk_size=getattr(config, "av_similarity_chunk_size", None),
         )
-        self.confidence_gate = AudioConfidenceGate(hidden_size, quality_dim=quality_dim, gate_logit_bias=gate_logit_bias)
+        self.confidence_gate = AudioConfidenceGate(
+            hidden_size,
+            quality_dim=quality_dim,
+            gate_logit_bias=gate_logit_bias,
+            enable_v1=enable_gate_v1,
+            silence_threshold=silence_threshold,
+            rms_reference=rms_reference,
+            max_offset_sec=max_offset_sec,
+        )
         self.fusion = GatedAVFusion(hidden_size, fusion_init=fusion_init)
 
 

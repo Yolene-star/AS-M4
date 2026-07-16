@@ -542,6 +542,7 @@ def model_prediction(
     previous_enable_scene_audio = getattr(model.config, "enable_scene_audio", None)
     previous_residual_scale = getattr(model.config, "debug_audio_residual_scale", 1.0)
     previous_delta_ratio_cap = getattr(model.config, "audio_delta_ratio_cap", 0.0)
+    previous_gate_v1 = getattr(model.config, "enable_audio_confidence_gate_v1", False)
     if force_audio_gate is not None:
         model.config.force_audio_gate = float(force_audio_gate)
     if enable_scene_audio is not None:
@@ -552,6 +553,16 @@ def model_prediction(
     delta_ratio_cap = exp.get("env", {}).get("AS_M4_AUDIO_DELTA_RATIO_CAP")
     active_delta_ratio_cap = float(delta_ratio_cap) if delta_ratio_cap is not None else 0.0
     model.config.audio_delta_ratio_cap = active_delta_ratio_cap
+    gate_v1 = exp.get("env", {}).get("AS_M4_ENABLE_AUDIO_CONFIDENCE_GATE_V1")
+    active_gate_v1 = str(gate_v1 or "0") in {"1", "true", "True"}
+    model.config.enable_audio_confidence_gate_v1 = active_gate_v1
+    streaming_av_module = getattr(model.get_model(), "streaming_av_module", None)
+    if isinstance(streaming_av_module, list):
+        streaming_av_module = streaming_av_module[0]
+    previous_module_gate_v1 = None
+    if streaming_av_module is not None and hasattr(streaming_av_module, "confidence_gate"):
+        previous_module_gate_v1 = streaming_av_module.confidence_gate.enable_v1
+        streaming_av_module.confidence_gate.enable_v1 = active_gate_v1
     frame_timestamps_arg = None
     if using_video_feature and qa.get("frame_timestamps") is not None:
         frame_timestamps_arg = torch.as_tensor(qa.get("frame_timestamps") or [], dtype=torch.float32, device=device).unsqueeze(0)
@@ -643,6 +654,9 @@ def model_prediction(
                 model.config.enable_scene_audio = previous_enable_scene_audio
             model.config.debug_audio_residual_scale = previous_residual_scale
             model.config.audio_delta_ratio_cap = previous_delta_ratio_cap
+            model.config.enable_audio_confidence_gate_v1 = previous_gate_v1
+            if previous_module_gate_v1 is not None:
+                streaming_av_module.confidence_gate.enable_v1 = previous_module_gate_v1
     diagnostics = None
     if dump_diagnostics:
         diagnostics = jsonable_diagnostics(getattr(model, "_last_streaming_av_diagnostics", None))
@@ -660,6 +674,7 @@ def model_prediction(
     token_debug["audio_input"] = audio_input_debug
     token_debug["audio_residual_scale"] = active_residual_scale
     token_debug["audio_delta_ratio_cap"] = active_delta_ratio_cap
+    token_debug["audio_confidence_gate_v1"] = active_gate_v1
     token_debug["first_token_logits"] = first_token_logits
     return prediction, diagnostics, {"prompt": prompt_debug, "tokens": token_debug}
 
