@@ -121,6 +121,10 @@ class ModelArguments:
     enable_audio_confidence_gate_v1: bool = field(default=False)
     audio_gate_silence_threshold: float = field(default=1e-4)
     audio_gate_rms_reference: float = field(default=0.05)
+    enable_audio_event_aligner_v1: bool = field(default=False)
+    audio_event_local_offset_sec: float = field(default=0.5)
+    audio_event_silence_threshold: float = field(default=1e-4)
+    audio_event_rms_reference: float = field(default=0.05)
 
     rope_scaling_factor: Optional[float] = field(default=None)
     rope_scaling_type: Optional[str] = field(default=None)

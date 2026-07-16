@@ -1,6 +1,12 @@
 """Streaming audio-video modules for AS-M4."""
 
 from .builder import StreamingAVModule, build_streaming_av_module
+from .audio_event_aligner import (
+    AudioEventFeatures,
+    LocalAudioAlignmentOutput,
+    LocalAudioEventAligner,
+    compute_audio_event_features,
+)
 from .confidence_gate import (
     AudioConfidenceGate,
     AudioConfidenceGateOutput,
@@ -18,6 +24,10 @@ __all__ = [
     "AudioConfidenceGateOutput",
     "AudioEventDetector",
     "AudioEventDetectorOutput",
+    "AudioEventFeatures",
+    "LocalAudioAlignmentOutput",
+    "LocalAudioEventAligner",
+    "compute_audio_event_features",
     "GatedAVFusion",
     "CausalTemporalAligner",
     "TemporalAlignerOutput",

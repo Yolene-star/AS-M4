@@ -33,10 +33,16 @@ class DummyConfig:
 
 
 class DummyStreamingModel(LlavaMetaForCausalLM):
-    def __init__(self, fusion_init: str = "zero", gate_v1: bool = False):
+    def __init__(
+        self,
+        fusion_init: str = "zero",
+        gate_v1: bool = False,
+        event_aligner_v1: bool = False,
+    ):
         self.config = DummyConfig()
         self.config.as_m4_fusion_init = fusion_init
         self.config.enable_audio_confidence_gate_v1 = gate_v1
+        self.config.enable_audio_event_aligner_v1 = event_aligner_v1
         self.device = torch.device("cpu")
         self.streaming_av_module = build_streaming_av_module(self.config)
 
@@ -141,6 +147,32 @@ def test_non_video_features_pass_through_unchanged():
     assert torch.allclose(fused, image)
 
 
+def test_audio_event_aligner_disabled_is_exact_no_op():
+    model = DummyStreamingModel(fusion_init="identity", event_aligner_v1=False)
+    video = torch.randn(2, 3, 4)
+    kwargs = {
+        "scene_audio_timestamps": torch.tensor([[[0.0, 1.0], [1.0, 2.0]]]),
+        "frame_timestamps": torch.tensor([[0.5, 1.5]]),
+    }
+
+    baseline = model.fuse_scene_audio_into_image_features(
+        [video],
+        ["video"],
+        _scene_output(),
+        **kwargs,
+    )[0]
+    with_unused_windows = model.fuse_scene_audio_into_image_features(
+        [video],
+        ["video"],
+        _scene_output(),
+        scene_audio_windows=torch.ones(1, 2, 160) * 0.1,
+        **kwargs,
+    )[0]
+
+    assert torch.equal(with_unused_windows, baseline)
+    assert "audio_event_aligner_v1_enabled" not in model._last_streaming_av_diagnostics[0]
+
+
 def test_streaming_av_modules_receive_gradients_from_fused_video_loss():
     model = DummyStreamingModel(fusion_init="identity")
     video = torch.zeros(2, 3, 4, requires_grad=True)
@@ -220,6 +252,40 @@ def test_gate_v1_integration_closes_silent_audio():
     diagnostics = model._last_streaming_av_diagnostics[0]
     assert diagnostics["gate_max"].item() == 0.0
     assert torch.equal(fused, video)
+
+
+@preserve_torch_rng
+def test_e7_gate_zero_stays_exact_with_alignment_diagnostics():
+    model = DummyStreamingModel(fusion_init="identity", gate_v1=True, event_aligner_v1=True)
+    video = torch.randn(2, 3, 4)
+
+    fused = model.fuse_scene_audio_into_image_features(
+        [video],
+        ["video"],
+        _scene_output(),
+        scene_audio_timestamps=torch.tensor([[[0.0, 1.0], [1.0, 2.0]]]),
+        frame_timestamps=torch.tensor([[0.5, 1.5]]),
+        force_audio_gate=0.0,
+        audio_delta_ratio_cap=0.03,
+        question_features=torch.ones(1, 4),
+        scene_audio_signal_features=compute_audio_signal_features(torch.ones(1, 2, 160) * 0.1),
+        scene_audio_windows=torch.ones(1, 2, 160) * 0.1,
+    )[0]
+
+    diagnostics = model._last_streaming_av_diagnostics[0]
+    assert torch.equal(fused, video)
+    assert diagnostics["gate_mean"].item() == 0.0
+    assert diagnostics["delta_norm"].item() == 0.0
+    assert diagnostics["audio_event_aligner_v1_enabled"] is True
+    for key in (
+        "event_strength",
+        "candidate_scores",
+        "best_offset",
+        "best_alignment_score",
+        "alignment_margin",
+        "alignment_confidence",
+    ):
+        assert torch.isfinite(diagnostics[key]).all()
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from torch import nn
 
+from .audio_event_aligner import LocalAudioEventAligner
 from .confidence_gate import AudioConfidenceGate
 from .event_detector import AudioEventDetector
 from .fusion import GatedAVFusion
@@ -32,6 +33,10 @@ class StreamingAVModule(nn.Module):
             align_dim=align_dim,
             max_offset_sec=max_offset_sec,
             similarity_chunk_size=getattr(config, "av_similarity_chunk_size", None),
+        )
+        local_offset_sec = float(getattr(config, "audio_event_local_offset_sec", 0.5))
+        self.audio_event_aligner = LocalAudioEventAligner(
+            candidate_offsets=(-local_offset_sec, 0.0, local_offset_sec)
         )
         self.confidence_gate = AudioConfidenceGate(
             hidden_size,

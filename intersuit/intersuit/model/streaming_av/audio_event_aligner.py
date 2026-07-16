@@ -1,0 +1,250 @@
+"""Diagnostic-only local audio event alignment for AS-M4."""
+
+from __future__ import annotations
+
+from typing import NamedTuple, Sequence
+
+import torch
+from torch import nn
+import torch.nn.functional as F
+
+
+class AudioEventFeatures(NamedTuple):
+    event_strength: torch.Tensor
+    is_silent_window: torch.Tensor
+    audio_rms: torch.Tensor
+    audio_peak: torch.Tensor
+    non_silent_ratio: torch.Tensor
+    feature_change: torch.Tensor
+    mask: torch.Tensor
+
+
+class LocalAudioAlignmentOutput(NamedTuple):
+    candidate_offsets: torch.Tensor
+    candidate_indices: torch.Tensor
+    candidate_valid: torch.Tensor
+    candidate_scores: torch.Tensor
+    best_offset: torch.Tensor
+    best_alignment_score: torch.Tensor
+    second_best_alignment_score: torch.Tensor
+    alignment_margin: torch.Tensor
+    alignment_confidence: torch.Tensor
+
+
+def compute_audio_event_features(
+    audio_windows: torch.Tensor,
+    audio_features: torch.Tensor | None = None,
+    sample_mask: torch.Tensor | None = None,
+    silence_threshold: float = 1e-4,
+    rms_reference: float = 0.05,
+) -> AudioEventFeatures:
+    """Compute bounded, interpretable event statistics for audio windows."""
+
+    windows = _ensure_audio_windows(audio_windows)
+    if silence_threshold < 0:
+        raise ValueError("silence_threshold must be non-negative")
+    if rms_reference <= 0:
+        raise ValueError("rms_reference must be positive")
+
+    batch, steps, samples = windows.shape
+    if samples == 0:
+        raise ValueError("audio_windows must contain at least one sample per window")
+    mask = _ensure_mask(sample_mask, batch, steps, windows.device)
+    finite = torch.nan_to_num(windows.float(), nan=0.0, posinf=0.0, neginf=0.0)
+    audio_rms = finite.square().mean(dim=-1).sqrt()
+    audio_peak = finite.abs().amax(dim=-1)
+    non_silent_ratio = finite.abs().gt(float(silence_threshold)).float().mean(dim=-1)
+    feature_change = _adjacent_feature_change(audio_features, audio_rms, mask)
+
+    rms_level = (audio_rms / float(rms_reference)).clamp(0.0, 1.0)
+    peak_level = (audio_peak / float(2.0 * rms_reference)).clamp(0.0, 1.0)
+    event_strength = (
+        0.40 * rms_level
+        + 0.20 * peak_level
+        + 0.25 * non_silent_ratio
+        + 0.15 * feature_change
+    ).clamp(0.0, 1.0)
+    is_silent = (audio_rms <= float(silence_threshold)) & (audio_peak <= float(silence_threshold))
+    event_strength = torch.where(is_silent, torch.zeros_like(event_strength), event_strength)
+
+    zeros = torch.zeros_like(audio_rms)
+    return AudioEventFeatures(
+        event_strength=torch.where(mask, event_strength, zeros),
+        is_silent_window=torch.where(mask, is_silent, torch.ones_like(is_silent)),
+        audio_rms=torch.where(mask, audio_rms, zeros),
+        audio_peak=torch.where(mask, audio_peak, zeros),
+        non_silent_ratio=torch.where(mask, non_silent_ratio, zeros),
+        feature_change=torch.where(mask, feature_change, zeros),
+        mask=mask,
+    )
+
+
+class LocalAudioEventAligner(nn.Module):
+    """Score nearby audio windows without changing the fused audio window."""
+
+    def __init__(self, candidate_offsets: Sequence[float] = (-0.5, 0.0, 0.5)) -> None:
+        super().__init__()
+        offsets = tuple(float(value) for value in candidate_offsets)
+        if len(offsets) < 2:
+            raise ValueError("candidate_offsets must contain at least two values")
+        if 0.0 not in offsets:
+            raise ValueError("candidate_offsets must include 0.0")
+        self.candidate_offsets = offsets
+
+    def forward(
+        self,
+        audio_features: torch.Tensor,
+        video_features: torch.Tensor,
+        audio_timestamps: torch.Tensor,
+        video_timestamps: torch.Tensor,
+        event_features: AudioEventFeatures,
+        audio_mask: torch.Tensor | None = None,
+        video_mask: torch.Tensor | None = None,
+    ) -> LocalAudioAlignmentOutput:
+        audio = _ensure_features(audio_features)
+        video = _summarize_video(video_features)
+        if audio.shape[0] != video.shape[0] or audio.shape[-1] != video.shape[-1]:
+            raise ValueError("audio/video batch or hidden dimensions do not match")
+
+        batch, audio_steps, hidden = audio.shape
+        video_steps = video.shape[1]
+        audio_times = _ensure_times(audio_timestamps, batch, audio_steps, audio.device)
+        video_times = _ensure_times(video_timestamps, batch, video_steps, video.device)
+        a_mask = _ensure_mask(audio_mask, batch, audio_steps, audio.device) & event_features.mask.to(audio.device)
+        v_mask = _ensure_mask(video_mask, batch, video_steps, video.device)
+        offsets = torch.tensor(self.candidate_offsets, device=audio.device, dtype=torch.float32)
+
+        target_audio_times = video_times.unsqueeze(-1) - offsets.view(1, 1, -1)
+        distances = (target_audio_times.unsqueeze(-1) - audio_times.unsqueeze(1).unsqueeze(1)).abs()
+        distances = distances.masked_fill(~a_mask.unsqueeze(1).unsqueeze(1), float("inf"))
+        candidate_indices = distances.argmin(dim=-1)
+
+        min_time = audio_times.masked_fill(~a_mask, float("inf")).amin(dim=-1, keepdim=True)
+        max_time = audio_times.masked_fill(~a_mask, float("-inf")).amax(dim=-1, keepdim=True)
+        has_audio = a_mask.any(dim=-1, keepdim=True)
+        candidate_valid = (
+            has_audio.unsqueeze(1)
+            & v_mask.unsqueeze(-1)
+            & (target_audio_times >= min_time.unsqueeze(1))
+            & (target_audio_times <= max_time.unsqueeze(1))
+        )
+
+        gather_index = candidate_indices.unsqueeze(-1).expand(-1, -1, -1, hidden)
+        expanded_audio = audio.unsqueeze(1).expand(-1, video_steps, -1, -1)
+        candidate_audio = torch.gather(expanded_audio, 2, gather_index)
+        candidate_strength = torch.gather(
+            event_features.event_strength.to(audio.device).unsqueeze(1).expand(-1, video_steps, -1),
+            2,
+            candidate_indices,
+        )
+        similarity = F.cosine_similarity(candidate_audio, video.unsqueeze(2), dim=-1, eps=1e-6)
+        similarity_score = ((similarity + 1.0) * 0.5).clamp(0.0, 1.0)
+        candidate_scores = torch.nan_to_num(
+            candidate_strength * similarity_score,
+            nan=0.0,
+            posinf=1.0,
+            neginf=0.0,
+        ).masked_fill(~candidate_valid, 0.0)
+
+        tie_break = offsets.abs().view(1, 1, -1) * 1e-6
+        selection_scores = (candidate_scores - tie_break).masked_fill(~candidate_valid, -1e9)
+        best_index = selection_scores.argmax(dim=-1)
+        best_score = torch.gather(candidate_scores, 2, best_index.unsqueeze(-1)).squeeze(-1)
+        best_offset = offsets[best_index]
+
+        sorted_scores = selection_scores.topk(k=2, dim=-1).indices
+        second_index = sorted_scores[..., 1]
+        second_score = torch.gather(candidate_scores, 2, second_index.unsqueeze(-1)).squeeze(-1)
+        second_score = torch.where(candidate_valid.sum(dim=-1) >= 2, second_score, best_score)
+        has_valid_candidate = candidate_valid.any(dim=-1)
+        best_score = torch.where(has_valid_candidate, best_score, torch.zeros_like(best_score))
+        best_offset = torch.where(has_valid_candidate, best_offset, torch.zeros_like(best_offset))
+        margin = (best_score - second_score).clamp_min(0.0)
+        confidence = (best_score * (0.5 + 0.5 * margin)).clamp(0.0, 1.0)
+
+        return LocalAudioAlignmentOutput(
+            candidate_offsets=offsets.view(1, 1, -1).expand(batch, video_steps, -1),
+            candidate_indices=candidate_indices,
+            candidate_valid=candidate_valid,
+            candidate_scores=candidate_scores,
+            best_offset=best_offset,
+            best_alignment_score=best_score,
+            second_best_alignment_score=second_score,
+            alignment_margin=margin,
+            alignment_confidence=confidence,
+        )
+
+
+def _ensure_audio_windows(audio_windows: torch.Tensor) -> torch.Tensor:
+    windows = audio_windows
+    if windows.ndim == 2:
+        windows = windows.unsqueeze(0)
+    if windows.ndim != 3:
+        raise ValueError(f"Expected audio windows shaped [B,T,S] or [T,S], got {tuple(windows.shape)}")
+    return windows
+
+
+def _ensure_features(features: torch.Tensor) -> torch.Tensor:
+    values = features
+    if values.ndim == 2:
+        values = values.unsqueeze(0)
+    if values.ndim != 3:
+        raise ValueError(f"Expected features shaped [B,T,H] or [T,H], got {tuple(values.shape)}")
+    return torch.nan_to_num(values.float(), nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def _summarize_video(video_features: torch.Tensor) -> torch.Tensor:
+    values = video_features.mean(dim=2) if video_features.ndim == 4 else video_features
+    return _ensure_features(values)
+
+
+def _ensure_times(
+    timestamps: torch.Tensor,
+    batch: int,
+    steps: int,
+    device: torch.device,
+) -> torch.Tensor:
+    times = timestamps.to(device=device, dtype=torch.float32)
+    if times.ndim == 1:
+        times = times.unsqueeze(0).expand(batch, -1)
+    if times.shape != (batch, steps):
+        raise ValueError(f"timestamps shape {tuple(times.shape)} does not match {(batch, steps)}")
+    return torch.nan_to_num(times, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def _ensure_mask(
+    mask: torch.Tensor | None,
+    batch: int,
+    steps: int,
+    device: torch.device,
+) -> torch.Tensor:
+    if mask is None:
+        return torch.ones(batch, steps, dtype=torch.bool, device=device)
+    values = mask.to(device=device, dtype=torch.bool)
+    if values.shape != (batch, steps):
+        raise ValueError(f"mask shape {tuple(values.shape)} does not match {(batch, steps)}")
+    return values
+
+
+def _adjacent_feature_change(
+    audio_features: torch.Tensor | None,
+    audio_rms: torch.Tensor,
+    mask: torch.Tensor,
+) -> torch.Tensor:
+    if audio_features is None:
+        values = audio_rms.unsqueeze(-1)
+    else:
+        values = _ensure_features(audio_features).to(device=audio_rms.device)
+        if values.shape[:2] != audio_rms.shape:
+            raise ValueError("audio_features windows do not match audio_windows")
+
+    pair_valid = mask[:, 1:] & mask[:, :-1]
+    numerator = (values[:, 1:] - values[:, :-1]).norm(dim=-1)
+    denominator = values[:, 1:].norm(dim=-1) + values[:, :-1].norm(dim=-1) + 1e-6
+    pair_change = (numerator / denominator).clamp(0.0, 1.0)
+    pair_change = torch.where(pair_valid, pair_change, torch.zeros_like(pair_change))
+    change = torch.zeros_like(audio_rms)
+    if audio_rms.shape[1] > 1:
+        change[:, 1:] = torch.maximum(change[:, 1:], pair_change)
+        change[:, :-1] = torch.maximum(change[:, :-1], pair_change)
+    return change

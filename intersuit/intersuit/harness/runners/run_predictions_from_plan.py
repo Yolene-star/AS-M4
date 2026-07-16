@@ -250,6 +250,15 @@ def apply_audio_condition(
             source = audio_pool[(sample_index + 1) % len(audio_pool)]
             result["scene_audio"] = source.get("scene_audio")
             result["scene_audio_timestamps"] = source.get("scene_audio_timestamps")
+            if source.get("scene_audio_path"):
+                result["scene_audio_path"] = source["scene_audio_path"]
+                for key in (
+                    "scene_audio_sample_rate",
+                    "scene_audio_window_sec",
+                    "scene_audio_hop_sec",
+                ):
+                    if source.get(key) is not None:
+                        result[key] = source[key]
         return result
 
     if audio is None:
@@ -543,6 +552,7 @@ def model_prediction(
     previous_residual_scale = getattr(model.config, "debug_audio_residual_scale", 1.0)
     previous_delta_ratio_cap = getattr(model.config, "audio_delta_ratio_cap", 0.0)
     previous_gate_v1 = getattr(model.config, "enable_audio_confidence_gate_v1", False)
+    previous_event_aligner_v1 = getattr(model.config, "enable_audio_event_aligner_v1", False)
     if force_audio_gate is not None:
         model.config.force_audio_gate = float(force_audio_gate)
     if enable_scene_audio is not None:
@@ -556,6 +566,9 @@ def model_prediction(
     gate_v1 = exp.get("env", {}).get("AS_M4_ENABLE_AUDIO_CONFIDENCE_GATE_V1")
     active_gate_v1 = str(gate_v1 or "0") in {"1", "true", "True"}
     model.config.enable_audio_confidence_gate_v1 = active_gate_v1
+    event_aligner_v1 = exp.get("env", {}).get("AS_M4_ENABLE_AUDIO_EVENT_ALIGNER_V1")
+    active_event_aligner_v1 = str(event_aligner_v1 or "0") in {"1", "true", "True"}
+    model.config.enable_audio_event_aligner_v1 = active_event_aligner_v1
     streaming_av_module = getattr(model.get_model(), "streaming_av_module", None)
     if isinstance(streaming_av_module, list):
         streaming_av_module = streaming_av_module[0]
@@ -655,6 +668,7 @@ def model_prediction(
             model.config.debug_audio_residual_scale = previous_residual_scale
             model.config.audio_delta_ratio_cap = previous_delta_ratio_cap
             model.config.enable_audio_confidence_gate_v1 = previous_gate_v1
+            model.config.enable_audio_event_aligner_v1 = previous_event_aligner_v1
             if previous_module_gate_v1 is not None:
                 streaming_av_module.confidence_gate.enable_v1 = previous_module_gate_v1
     diagnostics = None
@@ -675,6 +689,7 @@ def model_prediction(
     token_debug["audio_residual_scale"] = active_residual_scale
     token_debug["audio_delta_ratio_cap"] = active_delta_ratio_cap
     token_debug["audio_confidence_gate_v1"] = active_gate_v1
+    token_debug["audio_event_aligner_v1"] = active_event_aligner_v1
     token_debug["first_token_logits"] = first_token_logits
     return prediction, diagnostics, {"prompt": prompt_debug, "tokens": token_debug}
 

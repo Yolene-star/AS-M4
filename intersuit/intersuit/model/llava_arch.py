@@ -28,6 +28,7 @@ from .speech_encoder.builder import build_speech_encoder
 from .speech_projector.builder import  build_speech_projector
 from .scene_audio_encoder.builder import build_scene_audio_encoder
 from .streaming_av.builder import build_streaming_av_module
+from .streaming_av.audio_event_aligner import compute_audio_event_features
 from .streaming_av.confidence_gate import AudioSignalFeatures, compute_audio_signal_features
 from .streaming_av.fusion import apply_audio_delta_ratio_cap
 
@@ -201,6 +202,14 @@ class LlavaMetaModel:
             model_args, "audio_gate_silence_threshold", 1e-4
         )
         self.config.audio_gate_rms_reference = getattr(model_args, "audio_gate_rms_reference", 0.05)
+        self.config.enable_audio_event_aligner_v1 = getattr(
+            model_args, "enable_audio_event_aligner_v1", False
+        )
+        self.config.audio_event_local_offset_sec = getattr(model_args, "audio_event_local_offset_sec", 0.5)
+        self.config.audio_event_silence_threshold = getattr(
+            model_args, "audio_event_silence_threshold", 1e-4
+        )
+        self.config.audio_event_rms_reference = getattr(model_args, "audio_event_rms_reference", 0.05)
 
         if self.get_scene_audio_encoder() is None:
             scene_audio_encoder = build_scene_audio_encoder(self.config)
@@ -371,6 +380,7 @@ class LlavaMetaForCausalLM(ABC):
         audio_delta_ratio_cap=0.0,
         question_features=None,
         scene_audio_signal_features=None,
+        scene_audio_windows=None,
     ):
         """Fuse scene audio into per-frame video features before flattening.
 
@@ -432,6 +442,26 @@ class LlavaMetaForCausalLM(ABC):
             frame_audio = torch.matmul(weights_t, audio) / denom
             frame_audio = torch.nan_to_num(frame_audio, nan=0.0, posinf=0.0, neginf=0.0)
             video_summary = video.mean(dim=2)
+            local_alignment = None
+            event_features = None
+            if bool(getattr(self.config, "enable_audio_event_aligner_v1", False)):
+                if scene_audio_windows is None:
+                    raise ValueError("scene_audio_windows are required when audio event aligner v1 is enabled")
+                event_features = compute_audio_event_features(
+                    scene_audio_windows[idx : idx + 1].to(device=feature.device),
+                    audio_features=audio,
+                    sample_mask=audio_mask,
+                    silence_threshold=float(getattr(self.config, "audio_event_silence_threshold", 1e-4)),
+                    rms_reference=float(getattr(self.config, "audio_event_rms_reference", 0.05)),
+                )
+                local_alignment = streaming_av_module.audio_event_aligner(
+                    audio,
+                    video,
+                    audio_times,
+                    video_times,
+                    event_features,
+                    audio_mask=audio_mask,
+                )
             frame_confidence = align_output.offset_confidence.to(dtype=audio.dtype).unsqueeze(1).expand(-1, num_frames, -1)
             frame_confidence = (weights_t * frame_confidence).sum(dim=-1) / denom.squeeze(-1)
             frame_confidence = torch.nan_to_num(frame_confidence, nan=0.0, posinf=1.0, neginf=0.0)
@@ -515,6 +545,24 @@ class LlavaMetaForCausalLM(ABC):
                     "audio_residual_scale": float(audio_residual_scale),
                 }
             )
+            if local_alignment is not None and event_features is not None:
+                diagnostics[-1].update(
+                    {
+                        "audio_event_aligner_v1_enabled": True,
+                        "event_strength": event_features.event_strength.detach(),
+                        "is_silent_window": event_features.is_silent_window.detach(),
+                        "audio_rms": event_features.audio_rms.detach(),
+                        "audio_peak": event_features.audio_peak.detach(),
+                        "candidate_offsets": local_alignment.candidate_offsets.detach(),
+                        "candidate_valid": local_alignment.candidate_valid.detach(),
+                        "candidate_scores": local_alignment.candidate_scores.detach(),
+                        "best_offset": local_alignment.best_offset.detach(),
+                        "best_alignment_score": local_alignment.best_alignment_score.detach(),
+                        "second_best_alignment_score": local_alignment.second_best_alignment_score.detach(),
+                        "alignment_margin": local_alignment.alignment_margin.detach(),
+                        "alignment_confidence": local_alignment.alignment_confidence.detach(),
+                    }
+                )
             if streaming_av_module.confidence_gate.enable_v1:
                 gate_v1_diagnostics = streaming_av_module.confidence_gate.last_v1_diagnostics
                 diagnostics[-1].update(
@@ -1033,6 +1081,11 @@ class LlavaMetaForCausalLM(ABC):
             audio_delta_ratio_cap=getattr(self.config, "audio_delta_ratio_cap", 0.0),
             question_features=question_features,
             scene_audio_signal_features=scene_audio_signal_features,
+            scene_audio_windows=(
+                scene_audios
+                if bool(getattr(self.config, "enable_audio_event_aligner_v1", False))
+                else None
+            ),
         )
 
         mm_patch_merge_type = getattr(self.config, "mm_patch_merge_type", "flat")

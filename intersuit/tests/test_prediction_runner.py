@@ -239,6 +239,33 @@ def test_apply_audio_condition_builds_counterfactual_audio():
     assert muted["scene_audio"] is None
 
 
+def test_mismatched_condition_replaces_path_backed_audio():
+    qa0 = {
+        "scene_audio_path": "first.mp4",
+        "scene_audio_sample_rate": 16000,
+        "scene_audio_window_sec": 1.0,
+        "scene_audio_hop_sec": 0.5,
+    }
+    qa1 = {
+        "scene_audio_path": "second.mp4",
+        "scene_audio_sample_rate": 8000,
+        "scene_audio_window_sec": 2.0,
+        "scene_audio_hop_sec": 1.0,
+    }
+
+    mismatched = runner.apply_audio_condition(
+        qa0,
+        {"audio_condition": "mismatched"},
+        [qa0, qa1],
+        0,
+    )
+
+    assert mismatched["scene_audio_path"] == "second.mp4"
+    assert mismatched["scene_audio_sample_rate"] == 8000
+    assert mismatched["scene_audio_window_sec"] == 2.0
+    assert mismatched["scene_audio_hop_sec"] == 1.0
+
+
 def test_generated_token_slice_not_empty_when_tokens_exist():
     input_ids = torch.tensor([[10, 11, 12]])
     generated_only = torch.tensor([[21, 22]])
