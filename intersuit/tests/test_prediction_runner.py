@@ -276,6 +276,39 @@ def test_first_eos_is_reported():
     assert debug["first_new_token"] == "<eos>"
 
 
+def test_debug_audio_waveform_conditions_preserve_length_and_zero_pad_shifts():
+    waveform = torch.arange(5, dtype=torch.float32)
+
+    original = runner._apply_debug_waveform_condition(waveform, sample_rate=1, condition="original")
+    silence = runner._apply_debug_waveform_condition(waveform, sample_rate=1, condition="silence")
+    delayed = runner._apply_debug_waveform_condition(waveform, sample_rate=1, condition="shift", shift_seconds=2)
+    advanced = runner._apply_debug_waveform_condition(waveform, sample_rate=1, condition="shift", shift_seconds=-2)
+
+    assert torch.equal(original, waveform)
+    assert torch.equal(silence, torch.zeros_like(waveform))
+    assert delayed.tolist() == [0.0, 0.0, 0.0, 1.0, 2.0]
+    assert advanced.tolist() == [2.0, 3.0, 4.0, 0.0, 0.0]
+    assert all(value.shape == waveform.shape for value in (original, silence, delayed, advanced))
+
+
+def test_first_token_logits_reports_focus_tokens_and_ranks():
+    class Tokenizer:
+        eos_token_id = 5
+
+        def encode(self, text, add_special_tokens=False):
+            return {"A": [0], "B": [1], "C": [2], "D": [3]}[text]
+
+        def convert_ids_to_tokens(self, token_id):
+            return str(token_id)
+
+    debug = runner._first_token_logits_debug(torch.tensor([[4.0, 3.0, 2.0, 1.0, 0.0, -1.0]]), Tokenizer())
+
+    assert debug["focus_tokens"]["A"]["rank"] == 1
+    assert debug["focus_tokens"]["D"]["rank"] == 4
+    assert debug["focus_tokens"]["EOS"]["rank"] == 6
+    assert [item["token_id"] for item in debug["top10"]] == [0, 1, 2, 3, 4, 5]
+
+
 def test_choice_prompt_contains_assistant_boundary():
     from intersuit.conversation import conv_templates
 

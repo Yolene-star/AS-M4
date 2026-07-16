@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import nn
 
@@ -9,19 +11,26 @@ from torch import nn
 class GatedAVFusion(nn.Module):
     """Fuse aligned scene-audio features into video tokens without adding tokens."""
 
-    def __init__(self, hidden_size: int) -> None:
+    def __init__(self, hidden_size: int, fusion_init: str = "zero") -> None:
         super().__init__()
         if hidden_size <= 0:
             raise ValueError("hidden_size must be positive")
+        if fusion_init not in {"zero", "identity"}:
+            raise ValueError(f"fusion_init must be 'zero' or 'identity', got {fusion_init!r}")
         self.hidden_size = int(hidden_size)
+        self.fusion_init = fusion_init
         self.audio_projector = nn.Linear(hidden_size, hidden_size, bias=False)
-        nn.init.eye_(self.audio_projector.weight)
+        if fusion_init == "zero":
+            nn.init.zeros_(self.audio_projector.weight)
+        else:
+            nn.init.eye_(self.audio_projector.weight)
 
     def forward(
         self,
         video_tokens: torch.Tensor,
         aligned_audio: torch.Tensor,
         gate: torch.Tensor,
+        residual_scale: float = 1.0,
     ) -> torch.Tensor:
         """Return video-shaped fused tokens.
 
@@ -40,9 +49,19 @@ class GatedAVFusion(nn.Module):
         if aligned_audio.shape[-1] != self.hidden_size:
             raise ValueError("aligned_audio hidden dimension does not match fusion hidden_size")
 
-        audio_delta = self.audio_projector(aligned_audio).unsqueeze(2)
+        residual_scale = float(residual_scale)
+        if not math.isfinite(residual_scale) or residual_scale < 0:
+            raise ValueError("residual_scale must be a finite non-negative number")
+        aligned_audio = torch.nan_to_num(aligned_audio, nan=0.0, posinf=0.0, neginf=0.0)
+        audio_delta = self.audio_delta(aligned_audio)
+        audio_delta = torch.nan_to_num(audio_delta, nan=0.0, posinf=0.0, neginf=0.0).unsqueeze(2)
         gate_view = _broadcast_gate(gate, video_tokens)
-        return video_tokens + gate_view * audio_delta
+        gate_view = torch.nan_to_num(gate_view, nan=0.0, posinf=1.0, neginf=0.0)
+        return video_tokens + residual_scale * gate_view * audio_delta
+
+    def audio_delta(self, aligned_audio: torch.Tensor) -> torch.Tensor:
+        aligned_audio = torch.nan_to_num(aligned_audio, nan=0.0, posinf=0.0, neginf=0.0)
+        return self.audio_projector(aligned_audio)
 
 
 def _broadcast_gate(gate: torch.Tensor, video_tokens: torch.Tensor) -> torch.Tensor:
@@ -63,4 +82,3 @@ def _broadcast_gate(gate: torch.Tensor, video_tokens: torch.Tensor) -> torch.Ten
     else:
         raise ValueError(f"Cannot broadcast gate shape {tuple(gate.shape)} to video tokens")
     return gate
-

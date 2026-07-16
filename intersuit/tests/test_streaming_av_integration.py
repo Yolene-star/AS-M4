@@ -16,11 +16,14 @@ class DummyConfig:
     streaming_av_align_dim = 4
     max_av_offset_sec = 2.0
     av_similarity_chunk_size = 1
+    as_m4_fusion_init = "zero"
+    as_m4_gate_logit_bias = -5.0
 
 
 class DummyStreamingModel(LlavaMetaForCausalLM):
-    def __init__(self):
+    def __init__(self, fusion_init: str = "zero"):
         self.config = DummyConfig()
+        self.config.as_m4_fusion_init = fusion_init
         self.device = torch.device("cpu")
         self.streaming_av_module = build_streaming_av_module(self.config)
 
@@ -38,7 +41,7 @@ def _scene_output():
 
 
 def test_streaming_av_fusion_changes_video_features_when_gate_enabled():
-    model = DummyStreamingModel()
+    model = DummyStreamingModel(fusion_init="identity")
     video = torch.zeros(2, 3, 4)
 
     fused = model.fuse_scene_audio_into_image_features(
@@ -70,6 +73,26 @@ def test_force_gate_zero_recovers_video_features():
     assert torch.allclose(fused, video)
 
 
+def test_debug_residual_scale_zero_recovers_video_with_live_gate():
+    model = DummyStreamingModel(fusion_init="identity")
+    video = torch.randn(2, 3, 4)
+
+    fused = model.fuse_scene_audio_into_image_features(
+        [video],
+        ["video"],
+        _scene_output(),
+        scene_audio_timestamps=torch.tensor([[[0.0, 1.0], [1.0, 2.0]]]),
+        frame_timestamps=torch.tensor([[0.5, 1.5]]),
+        audio_residual_scale=0.0,
+    )[0]
+
+    diagnostics = model._last_streaming_av_diagnostics[0]
+    assert torch.equal(fused, video)
+    assert diagnostics["audio_residual_scale"] == 0.0
+    assert diagnostics["delta_norm"].item() == 0.0
+    assert diagnostics["delta_to_video_ratio"].item() == 0.0
+
+
 def test_non_video_features_pass_through_unchanged():
     model = DummyStreamingModel()
     image = torch.randn(1, 3, 4)
@@ -84,7 +107,7 @@ def test_non_video_features_pass_through_unchanged():
 
 
 def test_streaming_av_modules_receive_gradients_from_fused_video_loss():
-    model = DummyStreamingModel()
+    model = DummyStreamingModel(fusion_init="identity")
     video = torch.zeros(2, 3, 4, requires_grad=True)
 
     fused = model.fuse_scene_audio_into_image_features(

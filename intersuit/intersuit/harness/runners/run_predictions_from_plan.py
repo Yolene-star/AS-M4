@@ -327,14 +327,55 @@ def _load_video_tensor(video_path: str, image_processor: Any, model: Any, device
     return tensor.to(device=device, dtype=model_dtype)
 
 
-def _load_scene_audio_tensor(qa: dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor] | tuple[None, None]:
-    audio_path = qa.get("scene_audio_path")
+def _apply_debug_waveform_condition(
+    waveform: torch.Tensor,
+    sample_rate: int,
+    condition: str = "original",
+    shift_seconds: float = 0.0,
+) -> torch.Tensor:
+    """Apply debug-only audio perturbations without changing tensor length."""
+
+    if condition == "original" or condition == "wrong_audio":
+        return waveform
+    if condition == "silence":
+        return torch.zeros_like(waveform)
+    if condition != "shift":
+        raise ValueError(f"Unknown AS-M4 debug audio condition: {condition}")
+    shift_samples = int(round(float(shift_seconds) * sample_rate))
+    if shift_samples == 0:
+        return waveform.clone()
+    result = torch.zeros_like(waveform)
+    length = int(waveform.shape[-1])
+    amount = min(abs(shift_samples), length)
+    if shift_samples > 0 and amount < length:
+        result[..., amount:] = waveform[..., : length - amount]
+    elif shift_samples < 0 and amount < length:
+        result[..., : length - amount] = waveform[..., amount:]
+    return result
+
+
+def _load_scene_audio_tensor(
+    qa: dict[str, Any],
+    debug_condition: str = "original",
+    debug_source_path: str | None = None,
+    debug_shift_seconds: float = 0.0,
+) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]] | tuple[None, None, None]:
+    audio_path = debug_source_path or qa.get("scene_audio_path")
     if not audio_path:
-        return None, None
+        return None, None, None
     from intersuit.streaming.audio_stream import load_scene_audio, split_audio_windows, stack_audio_windows
 
     path = _resolve_repo_path(str(audio_path))
     waveform, sample_rate = load_scene_audio(path, sample_rate=int(qa.get("scene_audio_sample_rate") or 16000), mono=True)
+    original_num_samples = int(waveform.shape[-1])
+    waveform = _apply_debug_waveform_condition(
+        waveform,
+        sample_rate,
+        condition=debug_condition,
+        shift_seconds=debug_shift_seconds,
+    )
+    if int(waveform.shape[-1]) != original_num_samples:
+        raise ValueError("Debug audio perturbation changed waveform length")
     windows = split_audio_windows(
         waveform,
         sample_rate,
@@ -346,7 +387,45 @@ def _load_scene_audio_tensor(qa: dict[str, Any]) -> tuple[torch.Tensor, torch.Te
         raise ValueError(f"Scene audio decoded to zero samples: {path}")
     if not torch.isfinite(samples).all() or not torch.isfinite(timestamps).all():
         raise ValueError(f"Scene audio contains NaN/Inf: {path}")
-    return samples, timestamps
+    if samples.shape[0] != timestamps.shape[0]:
+        raise ValueError("Scene audio window/timestamp count mismatch")
+    metadata = {
+        "condition": debug_condition,
+        "source_path": str(path),
+        "shift_seconds": float(debug_shift_seconds),
+        "waveform_num_samples": original_num_samples,
+        "window_count": int(samples.shape[0]),
+        "window_num_samples": int(samples.shape[-1]),
+        "input_window_norm": float(samples.float().norm().item()),
+    }
+    return samples, timestamps, metadata
+
+
+def _first_token_logits_debug(scores: torch.Tensor, tokenizer: Any) -> dict[str, Any]:
+    logits = scores[0].detach().float().cpu()
+    probabilities = torch.softmax(logits, dim=-1)
+    _, top_ids = torch.topk(logits, k=min(10, logits.numel()))
+
+    def record(token_id: int) -> dict[str, Any]:
+        token_id = int(token_id)
+        logit = float(logits[token_id].item())
+        return {
+            "token_id": token_id,
+            "token_text": tokenizer.convert_ids_to_tokens(token_id),
+            "logit": logit,
+            "probability": float(probabilities[token_id].item()),
+            "rank": int((logits > logit).sum().item()) + 1,
+        }
+
+    top10 = [record(int(token_id)) for token_id in top_ids.tolist()]
+    focus: dict[str, Any] = {}
+    for label in ("A", "B", "C", "D"):
+        encoded = tokenizer.encode(label, add_special_tokens=False)
+        if len(encoded) != 1:
+            raise ValueError(f"Expected {label!r} to encode to one token, got {encoded}")
+        focus[label] = record(encoded[0])
+    focus["EOS"] = record(tokenizer.eos_token_id)
+    return {"top10": top10, "focus_tokens": focus}
 
 
 def model_prediction(
@@ -434,12 +513,19 @@ def model_prediction(
 
     scene_audios = None
     scene_audio_timestamps = None
+    audio_input_debug = None
     if exp.get("env", {}).get("AS_M4_ENABLE_SCENE_AUDIO") == "1" and qa.get("scene_audio") is not None:
         scene_audios = torch.as_tensor(qa["scene_audio"], dtype=model_dtype, device=device).unsqueeze(0)
         if qa.get("scene_audio_timestamps") is not None:
             scene_audio_timestamps = torch.as_tensor(qa["scene_audio_timestamps"], dtype=torch.float32, device=device).unsqueeze(0)
     elif exp.get("env", {}).get("AS_M4_ENABLE_SCENE_AUDIO") == "1" and qa.get("scene_audio_path"):
-        loaded_audio, loaded_timestamps = _load_scene_audio_tensor(qa)
+        debug_env = exp.get("env", {})
+        loaded_audio, loaded_timestamps, audio_input_debug = _load_scene_audio_tensor(
+            qa,
+            debug_condition=str(debug_env.get("AS_M4_DEBUG_AUDIO_CONDITION") or "original"),
+            debug_source_path=debug_env.get("AS_M4_DEBUG_AUDIO_SOURCE_PATH"),
+            debug_shift_seconds=float(debug_env.get("AS_M4_DEBUG_AUDIO_SHIFT_SECONDS") or 0.0),
+        )
         if loaded_audio is not None:
             scene_audios = loaded_audio.to(device=device, dtype=model_dtype).unsqueeze(0)
             scene_audio_timestamps = loaded_timestamps.to(device=device, dtype=torch.float32).unsqueeze(0)
@@ -454,14 +540,19 @@ def model_prediction(
     enable_scene_audio = exp.get("env", {}).get("AS_M4_ENABLE_SCENE_AUDIO")
     previous_force_audio_gate = getattr(model.config, "force_audio_gate", None)
     previous_enable_scene_audio = getattr(model.config, "enable_scene_audio", None)
+    previous_residual_scale = getattr(model.config, "debug_audio_residual_scale", 1.0)
     if force_audio_gate is not None:
         model.config.force_audio_gate = float(force_audio_gate)
     if enable_scene_audio is not None:
         model.config.enable_scene_audio = str(enable_scene_audio) in {"1", "true", "True"}
+    residual_scale = exp.get("env", {}).get("AS_M4_DEBUG_AUDIO_RESIDUAL_SCALE")
+    active_residual_scale = float(residual_scale) if residual_scale is not None else 1.0
+    model.config.debug_audio_residual_scale = active_residual_scale
     frame_timestamps_arg = None
     if using_video_feature and qa.get("frame_timestamps") is not None:
         frame_timestamps_arg = torch.as_tensor(qa.get("frame_timestamps") or [], dtype=torch.float32, device=device).unsqueeze(0)
     with torch.inference_mode():
+        first_token_logits = None
         try:
             if str(qa.get("generation_mode") or "generate") == "parallel":
                 pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
@@ -517,7 +608,8 @@ def model_prediction(
                 )
                 new_token_ids = extract_generated_token_ids(output_ids, base_ids, "parallel")
             else:
-                output_ids = model.generate(
+                capture_logits = str(exp.get("env", {}).get("AS_M4_DEBUG_CAPTURE_FIRST_TOKEN_LOGITS") or "0") in {"1", "true", "True"}
+                generation_output = model.generate(
                     input_ids,
                     attention_mask=attention_mask,
                     images=images,
@@ -530,13 +622,22 @@ def model_prediction(
                     max_new_tokens=max_new_tokens,
                     use_cache=True,
                     pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+                    return_dict_in_generate=capture_logits,
+                    output_scores=capture_logits,
                 )
+                if capture_logits:
+                    output_ids = generation_output.sequences
+                    if generation_output.scores:
+                        first_token_logits = _first_token_logits_debug(generation_output.scores[0], tokenizer)
+                else:
+                    output_ids = generation_output
                 new_token_ids = extract_generated_token_ids(output_ids, input_ids, "generate")
 
         finally:
             model.config.force_audio_gate = previous_force_audio_gate
             if previous_enable_scene_audio is not None:
                 model.config.enable_scene_audio = previous_enable_scene_audio
+            model.config.debug_audio_residual_scale = previous_residual_scale
     diagnostics = None
     if dump_diagnostics:
         diagnostics = jsonable_diagnostics(getattr(model, "_last_streaming_av_diagnostics", None))
@@ -551,6 +652,9 @@ def model_prediction(
             "first_20_full_generated_ids": output_values[:20],
         }
     )
+    token_debug["audio_input"] = audio_input_debug
+    token_debug["audio_residual_scale"] = active_residual_scale
+    token_debug["first_token_logits"] = first_token_logits
     return prediction, diagnostics, {"prompt": prompt_debug, "tokens": token_debug}
 
 

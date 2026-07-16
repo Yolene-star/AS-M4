@@ -189,6 +189,8 @@ class LlavaMetaModel:
         self.config.av_similarity_chunk_size = getattr(model_args, "av_similarity_chunk_size", None)
         self.config.force_audio_gate = getattr(model_args, "force_audio_gate", None)
         self.config.enable_scene_audio = getattr(model_args, "enable_scene_audio", True)
+        self.config.as_m4_fusion_init = getattr(model_args, "as_m4_fusion_init", "zero")
+        self.config.as_m4_gate_logit_bias = getattr(model_args, "as_m4_gate_logit_bias", -5.0)
 
         if self.get_scene_audio_encoder() is None:
             scene_audio_encoder = build_scene_audio_encoder(self.config)
@@ -342,6 +344,7 @@ class LlavaMetaForCausalLM(ABC):
         frame_timestamps=None,
         lookahead_sec=0.0,
         force_audio_gate=None,
+        audio_residual_scale=1.0,
     ):
         """Fuse scene audio into per-frame video features before flattening.
 
@@ -398,13 +401,17 @@ class LlavaMetaForCausalLM(ABC):
             )
 
             weights_t = align_output.alignment_weights.transpose(1, 2).to(dtype=audio.dtype)
+            weights_t = torch.nan_to_num(weights_t, nan=0.0, posinf=0.0, neginf=0.0)
             denom = weights_t.sum(dim=-1, keepdim=True).clamp_min(1e-12)
             frame_audio = torch.matmul(weights_t, audio) / denom
+            frame_audio = torch.nan_to_num(frame_audio, nan=0.0, posinf=0.0, neginf=0.0)
             video_summary = video.mean(dim=2)
             frame_confidence = align_output.offset_confidence.to(dtype=audio.dtype).unsqueeze(1).expand(-1, num_frames, -1)
             frame_confidence = (weights_t * frame_confidence).sum(dim=-1) / denom.squeeze(-1)
+            frame_confidence = torch.nan_to_num(frame_confidence, nan=0.0, posinf=1.0, neginf=0.0)
             frame_eventness = event_output.eventness.to(dtype=audio.dtype).unsqueeze(1).expand(-1, num_frames, -1)
             frame_eventness = (weights_t * frame_eventness).sum(dim=-1, keepdim=True) / denom
+            frame_eventness = torch.nan_to_num(frame_eventness, nan=0.0, posinf=1.0, neginf=0.0)
 
             gate_output = streaming_av_module.confidence_gate(
                 frame_audio,
@@ -415,14 +422,31 @@ class LlavaMetaForCausalLM(ABC):
             gate = gate_output.gate
             if force_audio_gate is not None:
                 gate = torch.zeros_like(gate) + float(force_audio_gate)
+            gate = torch.nan_to_num(gate, nan=0.0, posinf=1.0, neginf=0.0)
 
-            fused = streaming_av_module.fusion(video, frame_audio, gate)
+            audio_delta = streaming_av_module.fusion.audio_delta(frame_audio)
+            gated_delta = float(audio_residual_scale) * gate.to(dtype=audio_delta.dtype).view(audio_delta.shape[0], audio_delta.shape[1], 1, 1) * audio_delta.unsqueeze(2)
+            video_norm = video.detach().float().norm()
+            audio_norm = frame_audio.detach().float().norm()
+            delta_norm = gated_delta.detach().float().norm()
+            delta_to_video_ratio = delta_norm / video_norm.clamp_min(1e-12)
+            fused = streaming_av_module.fusion(video, frame_audio, gate, residual_scale=audio_residual_scale)
             fused_features.append(fused.squeeze(0))
             diagnostics.append(
                 {
                     "eventness": event_output.eventness.detach(),
                     "offset_sec": align_output.offset_sec.detach(),
                     "gate": gate.detach(),
+                    "quality_gate": gate_output.quality.detach(),
+                    "relevance_gate": gate_output.relevance.detach(),
+                    "gate_mean": gate.detach().float().mean(),
+                    "gate_max": gate.detach().float().max(),
+                    "gate_min": gate.detach().float().min(),
+                    "video_norm": video_norm,
+                    "audio_norm": audio_norm,
+                    "delta_norm": delta_norm,
+                    "delta_to_video_ratio": delta_to_video_ratio,
+                    "audio_residual_scale": float(audio_residual_scale),
                 }
             )
         self._last_streaming_av_diagnostics = diagnostics
@@ -571,26 +595,40 @@ class LlavaMetaForCausalLM(ABC):
         
         # print(images)
         
-        if type(images) is list or images.ndim == 5:
-            if type(images) is list:
-                images = [x.unsqueeze(0) if x.ndim == 3 else x for x in images]
-
+        has_video_feature = any(modality == "video_feature" for modality in modalities)
+        if type(images) is list or images.ndim == 5 or (has_video_feature and images.ndim == 4):
             video_idx_in_batch = []
             for _ in range(len(modalities)):
-                if modalities[_] == "video":
+                if modalities[_] in {"video", "video_feature"}:
                     video_idx_in_batch.append(_)
 
-            images_list = []
-            for image in images:
-                if image.ndim == 4:
-                    images_list.append(image)
+            if has_video_feature:
+                if torch.is_tensor(images):
+                    image_features = [images[idx] for idx in range(images.shape[0])]
                 else:
-                    images_list.append(image.unsqueeze(0))
+                    image_features = []
+                    for image in images:
+                        if image.ndim == 4 and image.shape[0] == 1:
+                            image_features.append(image[0])
+                        elif image.ndim == 3:
+                            image_features.append(image)
+                        else:
+                            image_features.append(image.squeeze(0) if image.ndim == 4 else image)
+            else:
+                if type(images) is list:
+                    images = [x.unsqueeze(0) if x.ndim == 3 else x for x in images]
 
-            concat_images = torch.cat([image for image in images_list], dim=0)
-            split_sizes = [image.shape[0] for image in images_list]
+                images_list = []
+                for image in images:
+                    if image.ndim == 4:
+                        images_list.append(image)
+                    else:
+                        images_list.append(image.unsqueeze(0))
 
-            image_features = self.encode_multimodals(concat_images, video_idx_in_batch, split_sizes)
+                concat_images = torch.cat([image for image in images_list], dim=0)
+                split_sizes = [image.shape[0] for image in images_list]
+
+                image_features = self.encode_multimodals(concat_images, video_idx_in_batch, split_sizes)
             # image_features = torch.split(image_features, split_sizes, dim=0)
             mm_patch_merge_type = getattr(self.config, "mm_patch_merge_type", "flat")
             image_aspect_ratio = getattr(self.config, "image_aspect_ratio", "square")
@@ -894,6 +932,7 @@ class LlavaMetaForCausalLM(ABC):
             frame_timestamps=frame_timestamps,
             lookahead_sec=getattr(self.config, "streaming_av_lookahead_sec", 0.0),
             force_audio_gate=getattr(self.config, "force_audio_gate", None),
+            audio_residual_scale=getattr(self.config, "debug_audio_residual_scale", 1.0),
         )
 
         mm_patch_merge_type = getattr(self.config, "mm_patch_merge_type", "flat")
