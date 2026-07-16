@@ -1,0 +1,56 @@
+{
+  "dataset": {
+    "name": "avut_human_muted_only_smoke",
+    "split": "fixed_smoke_20260716",
+    "manifest": "intersuit/inputs/texts/avut/avut_audio_smoke.json",
+    "scorer": "multiple_choice_contains_smoke"
+  },
+  "models": {
+    "baseline_m4": "intersuit/checkpoints/M4-LongVA-7B-Qwen2-train-12k-lowmem-nofreeze",
+    "as_m4": "intersuit/checkpoints/AS-M4-12kbase-canary150-after-e0e1e7-20260716"
+  },
+  "output_root": "intersuit/harness/artifacts/as_m4_avut_smoke/20260716_muted_only_single/predictions",
+  "experiment_ids": ["E0", "E1", "E7"],
+  "generation": {
+    "model_name_override": "LongVA-Qwen2",
+    "generation_mode": "generate",
+    "video_max_frames": 32,
+    "max_new_tokens": 48,
+    "do_sample": false,
+    "temperature": 0,
+    "random_seed": 20260716,
+    "diagnostics": true
+  },
+  "experiments": [
+    {
+      "id": "E0",
+      "description": "已验证的 M4 12k no-freeze baseline，不启用场景音频。",
+      "model_key": "baseline_m4",
+      "audio_condition": "none",
+      "rollback_mode": "weights12k",
+      "force_audio_gate": null,
+      "alignment": "off",
+      "gate_ablation": "none"
+    },
+    {
+      "id": "E1",
+      "description": "完整 AS-M4，使用当前视频的真实同步音轨。",
+      "model_key": "as_m4",
+      "audio_condition": "correct",
+      "rollback_mode": "none",
+      "force_audio_gate": null,
+      "alignment": "on",
+      "gate_ablation": "none"
+    },
+    {
+      "id": "E7",
+      "description": "与 E1 相同 checkpoint 和真实音轨，但强制 audio gate=0。",
+      "model_key": "as_m4",
+      "audio_condition": "correct",
+      "rollback_mode": "gate0",
+      "force_audio_gate": "0",
+      "alignment": "on",
+      "gate_ablation": "all"
+    }
+  ]
+}

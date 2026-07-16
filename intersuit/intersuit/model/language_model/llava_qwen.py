@@ -71,6 +71,18 @@ def transition_attention_mask_pt(b, h, q_idx, kv_idx, prefix_length, channel, de
     return combined_mask
 
 
+def infer_parallel_prefix_length(input_ids, inputs_embeds, image_token_index=IMAGE_TOKEN_INDEX):
+    if input_ids is None or inputs_embeds is None or input_ids.numel() == 0:
+        return inputs_embeds.shape[1] if inputs_embeds is not None else 0
+    image_positions = torch.where(input_ids[0] == image_token_index)[0]
+    if image_positions.numel() == 0:
+        return min(input_ids.shape[1], inputs_embeds.shape[1])
+    num_image_tokens = int((input_ids[0] == image_token_index).sum().item())
+    inserted_tokens = inputs_embeds.shape[1] - input_ids.shape[1] + num_image_tokens
+    prefix_length = int(image_positions[0].item()) + max(inserted_tokens, 0) + 1
+    return max(1, min(prefix_length, inputs_embeds.shape[1]))
+
+
 class LlavaQwenConfig(Qwen2Config):
     model_type = "llava_qwen"
 
@@ -291,6 +303,7 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
         if "inputs_embeds" in kwargs:
             raise NotImplementedError("`inputs_embeds` is not supported")
 
+        original_inputs = inputs
         if images is not None:
             if scene_audios is not None:
                 (inputs, position_ids, attention_mask, _, inputs_embeds, _) = self.prepare_inputs_labels_for_streaming_av(
@@ -316,6 +329,13 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
 
+        image_token_count = int((original_inputs == IMAGE_TOKEN_INDEX).sum().item()) if original_inputs is not None else 0
+        self._last_generation_debug = {
+            "input_embedding_length": int(inputs_embeds.shape[1]),
+            "visual_embedding_count": int(inputs_embeds.shape[1] - original_inputs.shape[1] + image_token_count)
+            if original_inputs is not None
+            else 0,
+        }
         return super().generate(position_ids=position_ids, attention_mask=attention_mask, inputs_embeds=inputs_embeds, **kwargs)
     
     @torch.no_grad()
@@ -340,6 +360,7 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
         if "inputs_embeds" in kwargs:
             raise NotImplementedError("`inputs_embeds` is not supported")
 
+        original_inputs = inputs
         if images is not None:
             if scene_audios is not None:
                 (inputs, position_ids, attention_mask, _, inputs_embeds, _) = self.prepare_inputs_labels_for_streaming_av(
@@ -389,19 +410,26 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
             else:
                 new_inputs_embeds = self.get_model().embed_tokens(new_query)
         else:
-            new_inputs_embeds = None
+                new_inputs_embeds = None
         bsz, seq = inputs_embeds.shape[:-1]
 
-        # get channel ids 10: system; 14: 13: system+template
-        prefix_length = 13 + 32 * 144 + 1 # system + video # prefix prompt + frame
+        prefix_length = infer_parallel_prefix_length(original_inputs, inputs_embeds)
+        image_token_count = int((original_inputs == IMAGE_TOKEN_INDEX).sum().item()) if original_inputs is not None else 0
+        self._last_generation_debug = {
+            "input_embedding_length": int(inputs_embeds.shape[1]),
+            "visual_embedding_count": int(inputs_embeds.shape[1] - original_inputs.shape[1] + image_token_count)
+            if original_inputs is not None
+            else 0,
+            "computed_prefix_length": int(prefix_length),
+        }
         channel = [0] * prefix_length + [1] * (seq - prefix_length)
         # # construct new attention masks by flexattention
         def prefix_mask(b, h, q_idx, kv_idx):
-            return kv_idx <= prefix_length
+            return kv_idx < prefix_length
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
         def transition_attention_mask(b, h, q_idx, kv_idx):
-            prefix_mask = kv_idx <= prefix_length
+            prefix_mask = kv_idx < prefix_length
             causal_mask = q_idx >= kv_idx
             channel_tensor = torch.tensor(channel, dtype=torch.long, device=new_inputs_embeds.device)
             block_mask = channel_tensor[q_idx] == channel_tensor[kv_idx]

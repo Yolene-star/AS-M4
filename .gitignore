@@ -16,6 +16,10 @@ intersuit/local_demo/wav/
 intersuit/train_logs/
 intersuit/debug_logs/
 intersuit/torchrun_test_logs/
+intersuit/datasets/AVUT/
+intersuit/external/AVUT/
+intersuit/harness/artifacts/as_m4_avut_smoke/
+intersuit/harness/artifacts/
 *.safetensors
 *.pt
 *.pth
