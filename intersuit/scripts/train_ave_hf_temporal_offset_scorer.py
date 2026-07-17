@@ -37,7 +37,7 @@ INTERSUIT_ROOT = REPO_ROOT / "intersuit"
 DEFAULT_CLIP_MANIFEST = INTERSUIT_ROOT / "harness/artifacts/ave_hf_300_clip_window_features/ave_hf_clip_window_feature_manifest.jsonl"
 DEFAULT_RGB_MANIFEST = INTERSUIT_ROOT / "harness/artifacts/ave_hf_300_window_features/ave_hf_window_feature_manifest.jsonl"
 DEFAULT_SPLIT_SUMMARY = INTERSUIT_ROOT / "harness/artifacts/ave_hf_semantic_projector_clip300/semantic_projector_run_summary.json"
-DEFAULT_OUTPUT_ROOT = INTERSUIT_ROOT / "harness/artifacts/ave_hf_temporal_offset_context_scorer_clip300"
+DEFAULT_OUTPUT_ROOT = INTERSUIT_ROOT / "harness/artifacts/ave_hf_temporal_offset_context_scorer_clip300_0s_v3"
 OFFSETS = (-0.5, 0.0, 0.5)
 CONDITION_TO_BASE_SHIFT = {"original": 0, "shift_plus_0.5": 1, "shift_minus_0.5": -1}
 CONDITION_TO_TARGET = {"original": 1, "shift_plus_0.5": 0, "shift_minus_0.5": 2}
@@ -73,6 +73,9 @@ class OffsetRecord:
     rgb_change_strength: float
     energy_change_strength: float
     candidate_change_margin: float
+    sync_peak_delta: float
+    center_audio_dominance: float
+    center_video_dominance: float
 
 
 class OffsetScorer(nn.Module):
@@ -198,6 +201,39 @@ def scalar_context(cache: dict[str, Any], audio_index: int, video_index: int, ra
     return values.reshape(-1)
 
 
+def local_peak_lag(values: torch.Tensor, index: int, radius: int) -> float:
+    indices = context_indices(index, values.shape[0], radius)
+    local = values[indices]
+    if local.numel() == 0:
+        return 0.0
+    peak = int(local.argmax().item())
+    return float(peak - radius) * 0.5
+
+
+def center_dominance(values: torch.Tensor, index: int) -> float:
+    center = float(values[index].item())
+    neighbors = []
+    if index > 0:
+        neighbors.append(float(values[index - 1].item()))
+    if index + 1 < values.numel():
+        neighbors.append(float(values[index + 1].item()))
+    if not neighbors:
+        return 0.0
+    return center - (sum(neighbors) / len(neighbors))
+
+
+def sync_evidence(cache: dict[str, Any], audio_index: int, video_index: int, radius: int) -> dict[str, float]:
+    audio_signal = cache["audio_change"] + cache["energy_change"]
+    video_signal = cache["clip_change"] + cache["rgb_change"]
+    audio_lag = local_peak_lag(audio_signal, audio_index, radius)
+    video_lag = local_peak_lag(video_signal, video_index, radius)
+    return {
+        "sync_peak_delta": audio_lag - video_lag,
+        "center_audio_dominance": center_dominance(audio_signal, audio_index),
+        "center_video_dominance": center_dominance(video_signal, video_index),
+    }
+
+
 def build_row_cache(clip_row: dict[str, Any], rgb_row: dict[str, Any]) -> dict[str, Any]:
     audio, audio_ts = load_feature(Path(clip_row["audio_feature_path"]), "audio_embedding")
     clip, clip_ts = load_feature(Path(clip_row["video_feature_path"]), "video_features")
@@ -274,12 +310,23 @@ def build_records(
     top_k: int,
     min_change_quantile: float,
     min_candidate_change_margin: float,
+    require_center_peak: bool,
+    min_center_audio_dominance: float,
+    min_center_video_dominance: float,
+    context_radius: int,
 ) -> list[OffsetRecord]:
     records: list[OffsetRecord] = []
     for cache in caches:
         if cache["youtube_id"] not in split_ids:
             continue
         for window_idx, boundary_type in select_change_windows(cache, top_k, min_change_quantile):
+            center_evidence = sync_evidence(cache, window_idx, window_idx, context_radius)
+            if require_center_peak and abs(center_evidence["sync_peak_delta"]) > 1e-6:
+                continue
+            if center_evidence["center_audio_dominance"] < min_center_audio_dominance:
+                continue
+            if center_evidence["center_video_dominance"] < min_center_video_dominance:
+                continue
             per_condition: list[OffsetRecord] = []
             for condition in CONDITIONS:
                 base_shift = CONDITION_TO_BASE_SHIFT[condition]
@@ -293,6 +340,7 @@ def build_records(
                     per_condition = []
                     break
                 target_index = CONDITION_TO_TARGET[condition]
+                evidence = sync_evidence(cache, base, window_idx, context_radius)
                 per_condition.append(
                     OffsetRecord(
                         youtube_id=cache["youtube_id"],
@@ -309,6 +357,9 @@ def build_records(
                         rgb_change_strength=float(cache["rgb_change"][window_idx].item()),
                         energy_change_strength=float(cache["energy_change"][window_idx].item()),
                         candidate_change_margin=change_margin,
+                        sync_peak_delta=evidence["sync_peak_delta"],
+                        center_audio_dominance=evidence["center_audio_dominance"],
+                        center_video_dominance=evidence["center_video_dominance"],
                     )
                 )
             if len(per_condition) == len(CONDITIONS):
@@ -354,7 +405,26 @@ def make_tensor_dataset(
         candidate_audio, candidate_scalars = [], []
         for cand_idx in record.audio_candidate_windows:
             candidate_audio.append(context_with_deltas(cache["audio"], cand_idx, context_radius))
-            candidate_scalars.append(scalar_context(cache, cand_idx, video_idx, context_radius))
+            evidence = sync_evidence(cache, cand_idx, video_idx, context_radius)
+            candidate_scalars.append(
+                torch.cat(
+                    [
+                        scalar_context(cache, cand_idx, video_idx, context_radius),
+                        torch.tensor(
+                            [
+                                OFFSETS[len(candidate_scalars)],
+                                abs(OFFSETS[len(candidate_scalars)]),
+                                evidence["sync_peak_delta"],
+                                abs(evidence["sync_peak_delta"]),
+                                evidence["center_audio_dominance"],
+                                evidence["center_video_dominance"],
+                                evidence["center_audio_dominance"] * evidence["center_video_dominance"],
+                            ],
+                            dtype=torch.float32,
+                        ),
+                    ]
+                )
+            )
         audio_rows.append(torch.stack(candidate_audio))
         video_rows.append(video_context)
         scalar_rows.append(torch.stack(candidate_scalars))
@@ -386,6 +456,9 @@ def train_model(
     hidden_dim: int,
     seed: int,
     batch_size: int,
+    zero_class_weight: float,
+    loss_type: str,
+    focal_gamma: float,
 ) -> tuple[OffsetScorer, list[dict[str, Any]]]:
     torch.manual_seed(seed)
     rng = random.Random(seed)
@@ -403,7 +476,13 @@ def train_model(
         batch_targets = targets[batch_indices]
         optimizer.zero_grad(set_to_none=True)
         scores = model(batch_audio, batch_video, batch_scalars)
-        loss = F.cross_entropy(scores, batch_targets)
+        class_weights = torch.tensor([1.0, zero_class_weight, 1.0], dtype=scores.dtype)
+        if loss_type == "focal":
+            ce = F.cross_entropy(scores, batch_targets, weight=class_weights, reduction="none")
+            pt = torch.softmax(scores, dim=-1).gather(1, batch_targets.unsqueeze(1)).squeeze(1).clamp_min(1e-6)
+            loss = ((1.0 - pt) ** focal_gamma * ce).mean()
+        else:
+            loss = F.cross_entropy(scores, batch_targets, weight=class_weights)
         loss.backward()
         grad_norm_sq = 0.0
         for param in model.parameters():
@@ -426,10 +505,22 @@ def train_model(
 
 
 @torch.no_grad()
-def evaluate(model: OffsetScorer, audio: torch.Tensor, video: torch.Tensor, scalars: torch.Tensor, targets: torch.Tensor, records: list[OffsetRecord]) -> dict[str, Any]:
+def evaluate(
+    model: OffsetScorer,
+    audio: torch.Tensor,
+    video: torch.Tensor,
+    scalars: torch.Tensor,
+    targets: torch.Tensor,
+    records: list[OffsetRecord],
+    keep_zero_margin_threshold: float = 0.0,
+) -> dict[str, Any]:
     scores = model(audio, video, scalars)
     probs = torch.softmax(scores, dim=-1)
     pred = scores.argmax(dim=-1)
+    raw_pred = pred.clone()
+    if keep_zero_margin_threshold > 0:
+        best_shift_score = torch.maximum(scores[:, 0], scores[:, 2])
+        pred = torch.where(best_shift_score - scores[:, 1] < keep_zero_margin_threshold, torch.ones_like(pred), pred)
     sorted_scores = scores.sort(dim=-1, descending=True).values
     margins = sorted_scores[:, 0] - sorted_scores[:, 1]
     correct = pred.eq(targets)
@@ -437,12 +528,17 @@ def evaluate(model: OffsetScorer, audio: torch.Tensor, video: torch.Tensor, scal
     by_label: dict[str, list[float]] = defaultdict(list)
     by_boundary: dict[str, list[float]] = defaultdict(list)
     pred_counts = Counter()
+    raw_pred_counts = Counter()
+    zero_false_shift = 0
     for idx, record in enumerate(records):
         value = float(correct[idx].item())
         by_condition[record.condition].append(value)
         by_label[record.label].append(value)
         by_boundary[record.event_boundary_type].append(value)
         pred_counts[str(OFFSETS[int(pred[idx].item())])] += 1
+        raw_pred_counts[str(OFFSETS[int(raw_pred[idx].item())])] += 1
+        if record.condition == "original" and int(pred[idx].item()) != 1:
+            zero_false_shift += 1
     mean = lambda xs: float(torch.tensor(xs, dtype=torch.float32).mean().item()) if xs else None
     return {
         "sample_count": len(records),
@@ -454,6 +550,9 @@ def evaluate(model: OffsetScorer, audio: torch.Tensor, video: torch.Tensor, scal
         "label_accuracy": {key: mean(values) for key, values in sorted(by_label.items(), key=lambda item: (int(item[0]) if item[0].isdigit() else 9999, item[0]))},
         "boundary_type_accuracy": {key: mean(values) for key, values in sorted(by_boundary.items())},
         "prediction_distribution": dict(pred_counts),
+        "raw_prediction_distribution": dict(raw_pred_counts),
+        "zero_false_shift_count": zero_false_shift,
+        "keep_zero_margin_threshold": keep_zero_margin_threshold,
         "score_mean": [float(x) for x in scores.mean(dim=0).tolist()],
         "score_std": float(scores.std(unbiased=False).item()),
         "all_scores_finite": bool(torch.isfinite(scores).all().item()),
@@ -481,6 +580,11 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         f"- 候选窗口来源：BEATs/CLIP/RGB/能量变化峰值；本地 manifest 缺少可靠 AVE 事件起止字段，因此未使用官方边界监督。",
         f"- 上下文窗口数：{summary['config']['context_window_count']}",
         f"- 候选变化强度最小差距：{summary['config']['min_candidate_change_margin']}",
+        f"- 要求中心峰同步：{summary['config']['require_center_peak']}",
+        f"- 0s 类损失权重：{summary['config']['zero_class_weight']}",
+        f"- loss：{summary['config']['loss_type']}",
+        f"- 低置信保持 0s 阈值：{summary['config']['keep_zero_margin_threshold']}",
+        f"- 最小验证样本数门槛：{summary['config']['min_val_samples']}",
         f"- train 样本数：{summary['manifest_summary']['train_count']}",
         f"- val 样本数：{summary['manifest_summary']['val_count']}",
         f"- offset 分布：`{summary['manifest_summary']['target_offset_counts']}`",
@@ -500,6 +604,8 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
                 f"- val confidence mean：{val['confidence_mean']}",
                 f"- val condition accuracy：`{val['condition_accuracy']}`",
                 f"- val prediction distribution：`{val['prediction_distribution']}`",
+                f"- raw prediction distribution：`{val['raw_prediction_distribution']}`",
+                f"- original 被误修正数：{val['zero_false_shift_count']}",
                 f"- 无 NaN/Inf：{val['all_scores_finite']}",
                 f"- 分数塌缩：{val['collapsed_scores']}",
                 "",
@@ -531,6 +637,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         top_k=args.top_k_windows,
         min_change_quantile=args.min_change_quantile,
         min_candidate_change_margin=args.min_candidate_change_margin,
+        require_center_peak=args.require_center_peak,
+        min_center_audio_dominance=args.min_center_audio_dominance,
+        min_center_video_dominance=args.min_center_video_dominance,
+        context_radius=args.context_radius,
     )
     val_records = build_records(
         caches,
@@ -538,6 +648,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         top_k=args.top_k_windows,
         min_change_quantile=args.min_change_quantile,
         min_candidate_change_margin=args.min_candidate_change_margin,
+        require_center_peak=args.require_center_peak,
+        min_center_audio_dominance=args.min_center_audio_dominance,
+        min_center_video_dominance=args.min_center_video_dominance,
+        context_radius=args.context_radius,
     )
     train_records = balance_records_by_target(train_records, seed=args.seed)
     val_records = balance_records_by_target(val_records, seed=args.seed)
@@ -571,9 +685,28 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             hidden_dim=args.hidden_dim,
             seed=args.seed,
             batch_size=train_batch_size,
+            zero_class_weight=args.zero_class_weight,
+            loss_type=args.loss_type,
+            focal_gamma=args.focal_gamma,
         )
-        train_eval = evaluate(model, audio, video, scalars, targets, records)
-        val_eval = evaluate(model, val_audio, val_video, val_scalars, val_targets, val_records)
+        train_eval = evaluate(
+            model,
+            audio,
+            video,
+            scalars,
+            targets,
+            records,
+            keep_zero_margin_threshold=args.keep_zero_margin_threshold,
+        )
+        val_eval = evaluate(
+            model,
+            val_audio,
+            val_video,
+            val_scalars,
+            val_targets,
+            val_records,
+            keep_zero_margin_threshold=args.keep_zero_margin_threshold,
+        )
         save_checkpoint(output_root / f"temporal_offset_scorer_{name}.pt", model, {"stage": name, "steps": steps})
         runs.append({"name": name, "steps": steps, "history": history, "training": train_eval, "validation": val_eval})
     final = runs[-1]["validation"]
@@ -582,6 +715,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "temporal_offset_scorer_passed"
         if final["accuracy"] >= args.pass_accuracy
         and final["margin_mean"] > 0
+        and final["sample_count"] >= args.min_val_samples
         and len(balanced) >= 2
         and final["all_scores_finite"]
         and not final["collapsed_scores"]
@@ -593,6 +727,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "target_offset_counts": dict(Counter(str(record.correct_offset) for record in train_records + val_records)),
         "condition_counts": dict(Counter(record.condition for record in train_records + val_records)),
         "boundary_type_counts": dict(Counter(record.event_boundary_type for record in train_records + val_records)),
+        "sync_peak_delta_counts": dict(Counter(str(record.sync_peak_delta) for record in train_records + val_records)),
+        "center_audio_dominance_mean": float(np.mean([record.center_audio_dominance for record in train_records + val_records])),
+        "center_video_dominance_mean": float(np.mean([record.center_video_dominance for record in train_records + val_records])),
         "train_label_counts": dict(Counter(record.label for record in train_records)),
         "val_label_counts": dict(Counter(record.label for record in val_records)),
     }
@@ -606,11 +743,20 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "top_k_windows": args.top_k_windows,
             "min_change_quantile": args.min_change_quantile,
             "min_candidate_change_margin": args.min_candidate_change_margin,
+            "require_center_peak": args.require_center_peak,
+            "min_center_audio_dominance": args.min_center_audio_dominance,
+            "min_center_video_dominance": args.min_center_video_dominance,
             "context_radius": args.context_radius,
             "context_window_count": args.context_radius * 2 + 1,
             "hidden_dim": args.hidden_dim,
             "lr": args.lr,
             "seed": args.seed,
+            "zero_class_weight": args.zero_class_weight,
+            "loss_type": args.loss_type,
+            "focal_gamma": args.focal_gamma,
+            "keep_zero_margin_threshold": args.keep_zero_margin_threshold,
+            "pass_accuracy": args.pass_accuracy,
+            "min_val_samples": args.min_val_samples,
             "offsets": list(OFFSETS),
             "gate_or_dynamic_window_modified": False,
         },
@@ -632,6 +778,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-k-windows", type=int, default=4)
     parser.add_argument("--min-change-quantile", type=float, default=0.6)
     parser.add_argument("--min-candidate-change-margin", type=float, default=0.5)
+    parser.add_argument("--require-center-peak", action="store_true", help="只保留音频变化峰与视频变化峰都落在中心窗口的样本")
+    parser.add_argument("--min-center-audio-dominance", type=float, default=-1e9, help="中心音频变化强于前后窗口的最小差值")
+    parser.add_argument("--min-center-video-dominance", type=float, default=-1e9, help="中心视频变化强于前后窗口的最小差值")
     parser.add_argument("--context-radius", type=int, default=2)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -639,7 +788,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--overfit-steps", type=int, default=50)
     parser.add_argument("--overfit-samples", type=int, default=96)
     parser.add_argument("--batch-equivalent-size", type=int, default=32)
+    parser.add_argument("--zero-class-weight", type=float, default=1.0)
+    parser.add_argument("--loss-type", choices=("ce", "focal"), default="ce")
+    parser.add_argument("--focal-gamma", type=float, default=2.0)
+    parser.add_argument("--keep-zero-margin-threshold", type=float, default=0.0)
     parser.add_argument("--pass-accuracy", type=float, default=0.65)
+    parser.add_argument("--min-val-samples", type=int, default=60)
     return parser
 
 
