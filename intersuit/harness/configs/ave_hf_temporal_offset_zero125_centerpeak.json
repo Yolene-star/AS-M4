@@ -1,0 +1,31 @@
+{
+  "description": "冻结的 AVE_HF 时间同步 offset scorer 配置：中心峰过滤 + 0s 类权重 1.25。用于扩展 AVE 后复验，不再根据 30 条小验证集调参。",
+  "clip_manifest": "intersuit/harness/artifacts/ave_hf_300_clip_window_features/ave_hf_clip_window_feature_manifest.jsonl",
+  "rgb_manifest": "intersuit/harness/artifacts/ave_hf_300_window_features/ave_hf_window_feature_manifest.jsonl",
+  "split_summary": "intersuit/harness/artifacts/ave_hf_semantic_projector_clip300/semantic_projector_run_summary.json",
+  "output_root": "intersuit/harness/artifacts/ave_hf_temporal_offset_zero125_centerpeak_frozen",
+  "top_k_windows": 4,
+  "min_change_quantile": 0.6,
+  "min_candidate_change_margin": 0.5,
+  "require_center_peak": true,
+  "min_center_audio_dominance": -1000000000.0,
+  "min_center_video_dominance": -1000000000.0,
+  "context_radius": 2,
+  "hidden_dim": 128,
+  "lr": 0.001,
+  "zero_class_weight": 1.25,
+  "loss_type": "ce",
+  "focal_gamma": 2.0,
+  "keep_zero_margin_threshold": 0.0,
+  "overfit_steps": 50,
+  "overfit_samples": 96,
+  "batch_equivalent_size": 32,
+  "pass_accuracy": 0.65,
+  "min_val_samples": 100,
+  "seeds": [
+    20260718,
+    20260719,
+    20260720
+  ],
+  "gate_or_dynamic_window_modified": false
+}

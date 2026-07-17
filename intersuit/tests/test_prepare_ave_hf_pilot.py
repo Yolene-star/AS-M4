@@ -31,6 +31,19 @@ def test_select_diverse_rows_round_robins_labels_and_deduplicates_youtube_ids():
     assert len({row["youtube_id"] for row in selected}) == len(selected)
 
 
+def test_select_diverse_rows_excludes_existing_youtube_ids():
+    rows = [
+        {"label": 0, "youtube_id": "a"},
+        {"label": 0, "youtube_id": "b"},
+        {"label": 1, "youtube_id": "c"},
+        {"label": 1, "youtube_id": "d"},
+    ]
+
+    selected = pilot.select_diverse_rows(rows, limit=3, exclude_ids={"a", "c"})
+
+    assert [row["youtube_id"] for row in selected] == ["b", "d"]
+
+
 def test_normalizers_accept_ave_hf_schema():
     row = {
         "youtube_id": "abc123",

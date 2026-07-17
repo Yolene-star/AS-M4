@@ -189,9 +189,12 @@ def audio_non_empty(audio_path: Path) -> bool | None:
     return True
 
 
-def select_diverse_rows(rows: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+def select_diverse_rows(rows: list[dict[str, Any]], limit: int, exclude_ids: set[str] | None = None) -> list[dict[str, Any]]:
+    exclude_ids = exclude_ids or set()
     by_label: dict[Any, list[dict[str, Any]]] = {}
     for row in rows:
+        if normalize_youtube_id(row, 0) in exclude_ids:
+            continue
         by_label.setdefault(row.get("label"), []).append(row)
     selected: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
@@ -204,7 +207,7 @@ def select_diverse_rows(rows: list[dict[str, Any]], limit: int) -> list[dict[str
                 continue
             row = bucket.pop(0)
             youtube_id = normalize_youtube_id(row, len(selected))
-            if youtube_id in seen_ids:
+            if youtube_id in seen_ids or youtube_id in exclude_ids:
                 continue
             selected.append(row)
             seen_ids.add(youtube_id)
@@ -227,6 +230,7 @@ def load_pilot_rows(
     limit: int,
     parquet_file: str,
     selection: str,
+    exclude_ids: set[str] | None = None,
     local_files_only: bool = False,
 ) -> list[dict[str, Any]]:
     if split != "train":
@@ -240,10 +244,26 @@ def load_pilot_rows(
         table = pq.read_table(path)
         rows.extend(dict(row) for row in table.to_pylist())
     if selection == "first":
-        return rows[:limit]
+        exclude_ids = exclude_ids or set()
+        return [row for row in rows if normalize_youtube_id(row, 0) not in exclude_ids][:limit]
     if selection == "diverse_label":
-        return select_diverse_rows(rows, limit)
+        return select_diverse_rows(rows, limit, exclude_ids=exclude_ids)
     raise ValueError(f"未知 selection：{selection}")
+
+
+def load_exclude_ids(path: Path | None) -> set[str]:
+    if path is None:
+        return set()
+    ids: set[str] = set()
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            value = row.get("youtube_id") or row.get("sample_id")
+            if value is not None:
+                ids.add(str(value))
+    return ids
 
 
 def validate_row(row: dict[str, Any], index: int, split: str, output_root: Path) -> PilotRecord:
@@ -339,7 +359,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         os.environ["HF_ENDPOINT"] = args.hf_endpoint
     if args.disable_xet:
         os.environ["HF_HUB_DISABLE_XET"] = "1"
-    rows = load_pilot_rows(args.split, args.limit, args.parquet_file, args.selection, args.local_files_only)
+    exclude_manifest = Path(args.exclude_manifest).resolve() if args.exclude_manifest else None
+    exclude_ids = load_exclude_ids(exclude_manifest)
+    rows = load_pilot_rows(args.split, args.limit, args.parquet_file, args.selection, exclude_ids, args.local_files_only)
     records = [validate_row(row, index, args.split, output_root) for index, row in enumerate(rows)]
     valid = [record for record in records if record.valid]
     invalid = [record for record in records if not record.valid]
@@ -360,6 +382,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "resolved_parquet_files": resolve_parquet_files(args.parquet_file),
         "selection": args.selection,
         "local_files_only": args.local_files_only,
+        "exclude_manifest": str(exclude_manifest) if exclude_manifest else None,
+        "exclude_id_count": len(exclude_ids),
         "requested_count": args.limit,
         "loaded_count": len(rows),
         "valid_count": len(valid),
@@ -390,6 +414,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--threshold", type=int, default=18)
     parser.add_argument("--parquet-file", default=DEFAULT_TRAIN_SHARD)
     parser.add_argument("--selection", choices=("first", "diverse_label"), default="first")
+    parser.add_argument("--exclude-manifest", default=None, help="JSONL manifest，按 youtube_id/sample_id 排除已处理样本")
     parser.add_argument("--hf-endpoint", default="https://huggingface.co")
     parser.add_argument("--disable-xet", action="store_true", default=True)
     parser.add_argument("--local-files-only", action="store_true")
