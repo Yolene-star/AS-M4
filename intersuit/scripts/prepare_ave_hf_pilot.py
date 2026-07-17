@@ -26,6 +26,7 @@ INTERSUIT_ROOT = REPO_ROOT / "intersuit"
 DEFAULT_OUTPUT_ROOT = INTERSUIT_ROOT / "datasets" / "AVE_HF"
 DATASET_NAME = "mteb/AVE-Dataset"
 DEFAULT_TRAIN_SHARD = "data/train-00000-of-00011.parquet"
+ALL_TRAIN_SHARDS = tuple(f"data/train-{index:05d}-of-00011.parquet" for index in range(11))
 
 
 @dataclass(frozen=True)
@@ -215,15 +216,29 @@ def select_diverse_rows(rows: list[dict[str, Any]], limit: int) -> list[dict[str
     return selected
 
 
-def load_pilot_rows(split: str, limit: int, parquet_file: str, selection: str) -> list[dict[str, Any]]:
+def resolve_parquet_files(value: str) -> list[str]:
+    if value == "all_train":
+        return list(ALL_TRAIN_SHARDS)
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def load_pilot_rows(
+    split: str,
+    limit: int,
+    parquet_file: str,
+    selection: str,
+    local_files_only: bool = False,
+) -> list[dict[str, Any]]:
     if split != "train":
-        raise ValueError("当前 pilot 默认只支持 train split 的首个 parquet 分片")
+        raise ValueError("当前 pilot 默认只支持 train split 的 parquet 分片")
     import pyarrow.parquet as pq
     from huggingface_hub import hf_hub_download
 
-    path = hf_hub_download(DATASET_NAME, parquet_file, repo_type="dataset")
-    table = pq.read_table(path)
-    rows = [dict(row) for row in table.to_pylist()]
+    rows: list[dict[str, Any]] = []
+    for file_name in resolve_parquet_files(parquet_file):
+        path = hf_hub_download(DATASET_NAME, file_name, repo_type="dataset", local_files_only=local_files_only)
+        table = pq.read_table(path)
+        rows.extend(dict(row) for row in table.to_pylist())
     if selection == "first":
         return rows[:limit]
     if selection == "diverse_label":
@@ -296,7 +311,7 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         "",
         f"- 数据源：`{DATASET_NAME}`",
         f"- split：`{summary['split']}`",
-        f"- parquet 分片：`{summary['parquet_file']}`",
+        f"- parquet 分片：`{summary['resolved_parquet_files']}`",
         f"- 抽样方式：`{summary['selection']}`",
         f"- 请求数量：{summary['requested_count']}",
         f"- 有效数量：{summary['valid_count']}",
@@ -324,7 +339,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         os.environ["HF_ENDPOINT"] = args.hf_endpoint
     if args.disable_xet:
         os.environ["HF_HUB_DISABLE_XET"] = "1"
-    rows = load_pilot_rows(args.split, args.limit, args.parquet_file, args.selection)
+    rows = load_pilot_rows(args.split, args.limit, args.parquet_file, args.selection, args.local_files_only)
     records = [validate_row(row, index, args.split, output_root) for index, row in enumerate(rows)]
     valid = [record for record in records if record.valid]
     invalid = [record for record in records if not record.valid]
@@ -342,7 +357,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "dataset": DATASET_NAME,
         "split": args.split,
         "parquet_file": args.parquet_file,
+        "resolved_parquet_files": resolve_parquet_files(args.parquet_file),
         "selection": args.selection,
+        "local_files_only": args.local_files_only,
         "requested_count": args.limit,
         "loaded_count": len(rows),
         "valid_count": len(valid),
@@ -375,6 +392,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--selection", choices=("first", "diverse_label"), default="first")
     parser.add_argument("--hf-endpoint", default="https://huggingface.co")
     parser.add_argument("--disable-xet", action="store_true", default=True)
+    parser.add_argument("--local-files-only", action="store_true")
     return parser
 
 
