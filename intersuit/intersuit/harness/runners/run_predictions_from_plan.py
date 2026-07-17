@@ -311,6 +311,30 @@ def load_model_once(model_path: str, device: str, model_name_override: str | Non
     return tokenizer, model, image_processor, context_len
 
 
+def maybe_replace_scene_audio_encoder(model: Any, env: dict[str, str]) -> tuple[Any, Any]:
+    encoder_type = env.get("AS_M4_SCENE_AUDIO_ENCODER_TYPE")
+    if not encoder_type:
+        return None, None
+    model_body = model.get_model() if hasattr(model, "get_model") else model
+    previous_encoder = getattr(model_body, "scene_audio_encoder", None)
+    previous_type = getattr(model.config, "scene_audio_encoder_type", None)
+    model.config.scene_audio_encoder_type = encoder_type
+    model.config.scene_audio_torchaudio_bundle = env.get("AS_M4_SCENE_AUDIO_TORCHAUDIO_BUNDLE", "WAV2VEC2_BASE")
+    model.config.scene_audio_torchaudio_weight_path = env.get("AS_M4_SCENE_AUDIO_TORCHAUDIO_WEIGHT_PATH")
+    model.config.scene_audio_sample_rate = int(env.get("AS_M4_SCENE_AUDIO_SAMPLE_RATE", "16000"))
+    model.config.scene_audio_precomputed_shared_space = env.get(
+        "AS_M4_SCENE_AUDIO_PRECOMPUTED_SHARED_SPACE", "0"
+    ) in {"1", "true", "True", "yes"}
+
+    from intersuit.model.scene_audio_encoder.builder import build_scene_audio_encoder
+
+    device = next(model.parameters()).device
+    replacement = build_scene_audio_encoder(model.config).to(device=device)
+    replacement.eval()
+    setattr(model_body, "scene_audio_encoder", replacement)
+    return previous_encoder, previous_type
+
+
 def _resolve_repo_path(path_value: str) -> Path:
     path = Path(path_value)
     if path.is_absolute():
@@ -553,6 +577,8 @@ def model_prediction(
     previous_delta_ratio_cap = getattr(model.config, "audio_delta_ratio_cap", 0.0)
     previous_gate_v1 = getattr(model.config, "enable_audio_confidence_gate_v1", False)
     previous_event_aligner_v1 = getattr(model.config, "enable_audio_event_aligner_v1", False)
+    previous_scene_audio_encoder = None
+    previous_scene_audio_encoder_type = None
     if force_audio_gate is not None:
         model.config.force_audio_gate = float(force_audio_gate)
     if enable_scene_audio is not None:
@@ -576,6 +602,11 @@ def model_prediction(
     if streaming_av_module is not None and hasattr(streaming_av_module, "confidence_gate"):
         previous_module_gate_v1 = streaming_av_module.confidence_gate.enable_v1
         streaming_av_module.confidence_gate.enable_v1 = active_gate_v1
+    if exp.get("env", {}).get("AS_M4_SCENE_AUDIO_ENCODER_TYPE"):
+        previous_scene_audio_encoder, previous_scene_audio_encoder_type = maybe_replace_scene_audio_encoder(
+            model,
+            exp.get("env", {}),
+        )
     frame_timestamps_arg = None
     if using_video_feature and qa.get("frame_timestamps") is not None:
         frame_timestamps_arg = torch.as_tensor(qa.get("frame_timestamps") or [], dtype=torch.float32, device=device).unsqueeze(0)
@@ -669,6 +700,10 @@ def model_prediction(
             model.config.audio_delta_ratio_cap = previous_delta_ratio_cap
             model.config.enable_audio_confidence_gate_v1 = previous_gate_v1
             model.config.enable_audio_event_aligner_v1 = previous_event_aligner_v1
+            if previous_scene_audio_encoder is not None:
+                model_body = model.get_model() if hasattr(model, "get_model") else model
+                setattr(model_body, "scene_audio_encoder", previous_scene_audio_encoder)
+                model.config.scene_audio_encoder_type = previous_scene_audio_encoder_type
             if previous_module_gate_v1 is not None:
                 streaming_av_module.confidence_gate.enable_v1 = previous_module_gate_v1
     diagnostics = None

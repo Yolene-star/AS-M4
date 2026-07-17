@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from intersuit.model.streaming_av.audio_event_aligner import (
@@ -35,7 +36,7 @@ def test_sound_event_strength_exceeds_silence():
 
 
 def test_three_offsets_and_boundary_candidates_are_correct():
-    aligner = LocalAudioEventAligner()
+    aligner = LocalAudioEventAligner(hidden_size=5)
     audio = torch.eye(5).unsqueeze(0)
     video = audio.unsqueeze(2)
     times = _timestamps(5)
@@ -51,7 +52,7 @@ def test_three_offsets_and_boundary_candidates_are_correct():
 
 
 def test_single_valid_candidate_has_zero_margin():
-    aligner = LocalAudioEventAligner()
+    aligner = LocalAudioEventAligner(hidden_size=4)
     audio = torch.ones(1, 1, 4)
     video = audio.unsqueeze(2)
     times = torch.tensor([0.0])
@@ -64,7 +65,7 @@ def test_single_valid_candidate_has_zero_margin():
 
 
 def test_best_offset_and_alignment_margin_select_matching_window():
-    aligner = LocalAudioEventAligner()
+    aligner = LocalAudioEventAligner(hidden_size=5, semantic_feature_mode="shared_precomputed")
     audio = torch.eye(5).unsqueeze(0)
     video = audio[:, 3:4].unsqueeze(2)
     audio_times = _timestamps(5)
@@ -83,7 +84,11 @@ def test_best_offset_and_alignment_margin_select_matching_window():
 
 
 def test_semantic_similarity_dominates_event_strength():
-    aligner = LocalAudioEventAligner(event_strength_weight=0.05)
+    aligner = LocalAudioEventAligner(
+        hidden_size=4,
+        event_strength_weight=0.05,
+        semantic_feature_mode="shared_precomputed",
+    )
     audio = torch.tensor([[[0.0, 1.0, -1.0, 0.0], [1.0, -1.0, 0.0, 0.0], [0.0, 1.0, -1.0, 0.0]]])
     video = audio[:, 1:2].unsqueeze(2)
     audio_times = _timestamps(3)
@@ -99,7 +104,7 @@ def test_semantic_similarity_dominates_event_strength():
 
 
 def test_silent_candidates_have_zero_score_margin_and_confidence():
-    aligner = LocalAudioEventAligner()
+    aligner = LocalAudioEventAligner(hidden_size=4)
     audio = torch.randn(1, 3, 4)
     video = torch.randn(1, 3, 1, 4)
     times = _timestamps(3)
@@ -113,7 +118,7 @@ def test_silent_candidates_have_zero_score_margin_and_confidence():
 
 
 def test_bf16_inputs_are_finite():
-    aligner = LocalAudioEventAligner()
+    aligner = LocalAudioEventAligner(hidden_size=4)
     audio = torch.randn(1, 3, 4, dtype=torch.bfloat16)
     video = torch.randn(1, 3, 2, 4, dtype=torch.bfloat16)
     windows = torch.randn(1, 3, 80, dtype=torch.bfloat16) * 0.05
@@ -128,7 +133,7 @@ def test_bf16_inputs_are_finite():
 
 
 def test_nan_and_inf_inputs_are_sanitized():
-    aligner = LocalAudioEventAligner()
+    aligner = LocalAudioEventAligner(hidden_size=2)
     audio = torch.tensor([[[float("nan"), 0.0], [float("inf"), 1.0], [1.0, 0.0]]])
     video = torch.ones(1, 3, 1, 2)
     windows = torch.tensor([[[float("nan"), 0.0], [float("inf"), 0.0], [0.1, -0.1]]])
@@ -140,3 +145,57 @@ def test_nan_and_inf_inputs_are_sanitized():
     for value in (*events[:-1], *output):
         if torch.is_tensor(value) and value.is_floating_point():
             assert torch.isfinite(value).all()
+
+
+def test_default_mode_does_not_use_untrained_projectors_for_semantics():
+    aligner = LocalAudioEventAligner(hidden_size=4)
+    audio = torch.randn(1, 3, 4)
+    video = torch.randn(1, 3, 1, 4)
+    times = _timestamps(3)
+    events = compute_audio_event_features(torch.ones(1, 3, 80) * 0.1, audio_features=audio)
+
+    output = aligner(audio, video, times, times, events)
+
+    assert aligner.audio_proj is None
+    assert aligner.video_proj is None
+    assert torch.equal(output.semantic_similarity, torch.zeros_like(output.semantic_similarity))
+
+
+def test_invalid_semantic_mode_rejects_untrained_projection_path():
+    with pytest.raises(ValueError, match="random or untrained projectors are not allowed"):
+        LocalAudioEventAligner(hidden_size=4, semantic_feature_mode="random_projection")
+
+
+def test_projector_checkpoint_enables_semantic_scoring(tmp_path):
+    checkpoint = tmp_path / "projectors.pt"
+    torch.save(
+        {
+            "audio_proj.weight": torch.eye(3, 4),
+            "video_proj.weight": torch.eye(3, 4),
+        },
+        checkpoint,
+    )
+    aligner = LocalAudioEventAligner(
+        hidden_size=4,
+        projector_checkpoint_path=str(checkpoint),
+        event_strength_weight=0.0,
+    )
+    audio = torch.tensor([[[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]]])
+    video = audio[:, 1:2].unsqueeze(2)
+    audio_times = _timestamps(3)
+    video_times = torch.tensor([0.5])
+    events = compute_audio_event_features(torch.ones(1, 3, 80) * 0.1, audio_features=audio)
+
+    output = aligner(audio, video, audio_times, video_times, events)
+
+    assert aligner.semantic_feature_mode == "checkpoint_loaded"
+    assert all(not param.requires_grad for param in aligner.audio_proj.parameters())
+    assert output.best_offset.item() == 0.0
+    assert output.semantic_similarity[0, 0, 1] > output.semantic_similarity[0, 0, 0]
+
+
+def test_missing_projector_checkpoint_has_clear_error(tmp_path):
+    missing = tmp_path / "missing.pt"
+
+    with pytest.raises(FileNotFoundError, match="trained checkpoint"):
+        LocalAudioEventAligner(hidden_size=4, projector_checkpoint_path=str(missing))

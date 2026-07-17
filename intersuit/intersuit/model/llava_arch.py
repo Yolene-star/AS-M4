@@ -185,6 +185,14 @@ class LlavaMetaModel:
         self.config.scene_audio_encoder_type = getattr(model_args, "scene_audio_encoder_type", "dummy")
         self.config.scene_audio_hidden_size = getattr(model_args, "scene_audio_hidden_size", self.config.hidden_size)
         self.config.scene_audio_precomputed_dim = getattr(model_args, "scene_audio_precomputed_dim", None)
+        self.config.scene_audio_precomputed_shared_space = getattr(
+            model_args, "scene_audio_precomputed_shared_space", False
+        )
+        self.config.scene_audio_torchaudio_bundle = getattr(model_args, "scene_audio_torchaudio_bundle", "WAV2VEC2_BASE")
+        self.config.scene_audio_torchaudio_weight_path = (
+            getattr(model_args, "scene_audio_torchaudio_weight_path", None) or None
+        )
+        self.config.scene_audio_sample_rate = getattr(model_args, "scene_audio_sample_rate", 16000)
         self.config.num_audio_events = getattr(model_args, "num_audio_events", 25)
         self.config.audio_quality_dim = getattr(model_args, "audio_quality_dim", 1)
         self.config.streaming_av_align_dim = getattr(model_args, "streaming_av_align_dim", self.config.hidden_size)
@@ -211,6 +219,15 @@ class LlavaMetaModel:
         )
         self.config.audio_event_rms_reference = getattr(model_args, "audio_event_rms_reference", 0.05)
         self.config.audio_event_strength_weight = getattr(model_args, "audio_event_strength_weight", 0.05)
+        self.config.audio_event_align_dim = getattr(
+            model_args, "audio_event_align_dim", self.config.streaming_av_align_dim
+        )
+        self.config.audio_event_semantic_feature_mode = getattr(
+            model_args, "audio_event_semantic_feature_mode", "disabled"
+        )
+        self.config.audio_event_projector_checkpoint_path = (
+            getattr(model_args, "audio_event_projector_checkpoint_path", None) or None
+        )
 
         if self.get_scene_audio_encoder() is None:
             scene_audio_encoder = build_scene_audio_encoder(self.config)

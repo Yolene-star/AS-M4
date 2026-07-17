@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from .scene_audio_encoder import DummySceneAudioEncoder, PrecomputedSceneAudioEncoder
+from .scene_audio_encoder import (
+    DummySceneAudioEncoder,
+    FrozenTorchaudioSceneAudioEncoder,
+    PrecomputedSceneAudioEncoder,
+)
 
 
 def build_scene_audio_encoder(config):
@@ -12,6 +16,7 @@ def build_scene_audio_encoder(config):
 
     - ``dummy``: deterministic waveform statistics, useful for harnesses.
     - ``precomputed``: accepts already extracted features.
+    - ``frozen_torchaudio``: frozen torchaudio SSL bundle such as WAV2VEC2_BASE.
     """
 
     encoder_type = getattr(config, "scene_audio_encoder_type", "dummy")
@@ -24,7 +29,17 @@ def build_scene_audio_encoder(config):
         return DummySceneAudioEncoder(hidden_size=hidden_size)
     if encoder_type == "precomputed":
         input_dim = getattr(config, "scene_audio_precomputed_dim", None)
-        return PrecomputedSceneAudioEncoder(hidden_size=hidden_size, input_dim=input_dim)
+        return PrecomputedSceneAudioEncoder(
+            hidden_size=hidden_size,
+            input_dim=input_dim,
+            shared_semantic_space=bool(getattr(config, "scene_audio_precomputed_shared_space", False)),
+        )
+    if encoder_type == "frozen_torchaudio":
+        return FrozenTorchaudioSceneAudioEncoder(
+            hidden_size=hidden_size,
+            bundle_name=getattr(config, "scene_audio_torchaudio_bundle", "WAV2VEC2_BASE"),
+            sample_rate=int(getattr(config, "scene_audio_sample_rate", 16000)),
+            weight_path=getattr(config, "scene_audio_torchaudio_weight_path", None) or None,
+        )
 
     raise ValueError(f"Unknown scene audio encoder: {encoder_type}")
-

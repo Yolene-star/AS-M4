@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import NamedTuple, Sequence
 
 import torch
@@ -84,12 +85,22 @@ def compute_audio_event_features(
 class LocalAudioEventAligner(nn.Module):
     """Score nearby audio windows without changing the fused audio window."""
 
+    SEMANTIC_DISABLED = "disabled"
+    SEMANTIC_SHARED_PRECOMPUTED = "shared_precomputed"
+    SEMANTIC_CHECKPOINT_LOADED = "checkpoint_loaded"
+
     def __init__(
         self,
+        hidden_size: int,
+        align_dim: int | None = None,
         candidate_offsets: Sequence[float] = (-0.5, 0.0, 0.5),
         event_strength_weight: float = 0.05,
+        semantic_feature_mode: str = SEMANTIC_DISABLED,
+        projector_checkpoint_path: str | None = None,
     ) -> None:
         super().__init__()
+        if hidden_size <= 0:
+            raise ValueError("hidden_size must be positive")
         offsets = tuple(float(value) for value in candidate_offsets)
         if len(offsets) < 2:
             raise ValueError("candidate_offsets must contain at least two values")
@@ -97,8 +108,19 @@ class LocalAudioEventAligner(nn.Module):
             raise ValueError("candidate_offsets must include 0.0")
         if event_strength_weight < 0:
             raise ValueError("event_strength_weight must be non-negative")
+        self.hidden_size = int(hidden_size)
+        self.align_dim = int(align_dim or hidden_size)
         self.candidate_offsets = offsets
         self.event_strength_weight = float(event_strength_weight)
+        self.audio_proj: nn.Linear | None = None
+        self.video_proj: nn.Linear | None = None
+        self.semantic_feature_mode = self._normalize_semantic_feature_mode(semantic_feature_mode)
+        if self.semantic_feature_mode == self.SEMANTIC_CHECKPOINT_LOADED:
+            if projector_checkpoint_path is None:
+                raise ValueError("projector_checkpoint_path is required for checkpoint_loaded semantic mode")
+            self.load_projector_checkpoint(projector_checkpoint_path)
+        elif projector_checkpoint_path is not None:
+            self.load_projector_checkpoint(projector_checkpoint_path)
 
     def forward(
         self,
@@ -114,6 +136,8 @@ class LocalAudioEventAligner(nn.Module):
         video = _summarize_video(video_features)
         if audio.shape[0] != video.shape[0] or audio.shape[-1] != video.shape[-1]:
             raise ValueError("audio/video batch or hidden dimensions do not match")
+        if audio.shape[-1] != self.hidden_size:
+            raise ValueError(f"Expected hidden_size {self.hidden_size}, got {audio.shape[-1]}")
 
         batch, audio_steps, hidden = audio.shape
         video_steps = video.shape[1]
@@ -147,10 +171,10 @@ class LocalAudioEventAligner(nn.Module):
             candidate_indices,
         )
         video_event_strength = _temporal_feature_change(video, v_mask)
-        audio_key = _normalize_projected_features(candidate_audio)
-        video_key = _normalize_projected_features(video).unsqueeze(2)
-        semantic_similarity = F.cosine_similarity(audio_key, video_key, dim=-1, eps=1e-6)
+        semantic_similarity = self._semantic_similarity(candidate_audio, video, candidate_valid)
         semantic_score = ((semantic_similarity + 1.0) * 0.5).clamp(0.0, 1.0)
+        if self.semantic_feature_mode == self.SEMANTIC_DISABLED:
+            semantic_score = torch.zeros_like(semantic_score)
         event_match = 1.0 - (candidate_strength - video_event_strength.unsqueeze(-1)).abs().clamp(0.0, 1.0)
         candidate_scores = torch.nan_to_num(
             semantic_score
@@ -191,6 +215,88 @@ class LocalAudioEventAligner(nn.Module):
             alignment_confidence=confidence,
         )
 
+    def load_projector_checkpoint(self, checkpoint_path: str | Path, map_location: str | torch.device = "cpu") -> None:
+        """Load trained audio/video projectors before semantic scoring is enabled."""
+
+        path = Path(checkpoint_path)
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"Audio event aligner projector checkpoint not found: {path}. "
+                "Semantic alignment with trainable projections requires a trained checkpoint."
+            )
+        try:
+            checkpoint = torch.load(path, map_location=map_location, weights_only=True)
+        except TypeError:
+            checkpoint = torch.load(path, map_location=map_location)
+        state = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
+        if not isinstance(state, dict):
+            raise ValueError("Projector checkpoint must contain a state_dict-like mapping")
+
+        audio_weight = _find_weight(state, ("audio_proj.weight", "audio_projector.weight"))
+        video_weight = _find_weight(state, ("video_proj.weight", "video_projector.weight"))
+        if audio_weight is None or video_weight is None:
+            raise ValueError("Projector checkpoint must contain audio_proj.weight and video_proj.weight")
+        if audio_weight.ndim != 2 or video_weight.ndim != 2:
+            raise ValueError("Projector weights must be rank-2 tensors")
+        if audio_weight.shape[1] != self.hidden_size or video_weight.shape[1] != self.hidden_size:
+            raise ValueError(
+                "Projector input dimensions do not match aligner hidden_size: "
+                f"audio={tuple(audio_weight.shape)}, video={tuple(video_weight.shape)}, hidden_size={self.hidden_size}"
+            )
+        if audio_weight.shape[0] != video_weight.shape[0]:
+            raise ValueError("Audio and video projector output dimensions must match")
+
+        self.align_dim = int(audio_weight.shape[0])
+        self.audio_proj = nn.Linear(self.hidden_size, self.align_dim, bias=False)
+        self.video_proj = nn.Linear(self.hidden_size, self.align_dim, bias=False)
+        with torch.no_grad():
+            self.audio_proj.weight.copy_(audio_weight.to(dtype=self.audio_proj.weight.dtype))
+            self.video_proj.weight.copy_(video_weight.to(dtype=self.video_proj.weight.dtype))
+        for module in (self.audio_proj, self.video_proj):
+            for param in module.parameters():
+                param.requires_grad = False
+        self.semantic_feature_mode = self.SEMANTIC_CHECKPOINT_LOADED
+
+    def enable_shared_precomputed_semantic_features(self) -> None:
+        """Allow cosine scoring when audio/video features are already in one semantic space."""
+
+        self.semantic_feature_mode = self.SEMANTIC_SHARED_PRECOMPUTED
+
+    def _semantic_similarity(
+        self,
+        candidate_audio: torch.Tensor,
+        video: torch.Tensor,
+        candidate_valid: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.semantic_feature_mode == self.SEMANTIC_DISABLED:
+            return torch.zeros(candidate_audio.shape[:-1], device=candidate_audio.device, dtype=torch.float32)
+        if self.semantic_feature_mode == self.SEMANTIC_SHARED_PRECOMPUTED:
+            audio_key = _normalize_projected_features(candidate_audio)
+            video_key = _normalize_projected_features(video).unsqueeze(2)
+        elif self.semantic_feature_mode == self.SEMANTIC_CHECKPOINT_LOADED:
+            if self.audio_proj is None or self.video_proj is None:
+                raise ValueError("Semantic projector checkpoint was not loaded")
+            audio_key = _normalize_projected_features(self.audio_proj(candidate_audio))
+            video_key = _normalize_projected_features(self.video_proj(video)).unsqueeze(2)
+        else:
+            raise ValueError(f"Unknown semantic_feature_mode: {self.semantic_feature_mode}")
+        similarity = F.cosine_similarity(audio_key, video_key, dim=-1, eps=1e-6)
+        return similarity.masked_fill(~candidate_valid, 0.0)
+
+    def _normalize_semantic_feature_mode(self, mode: str) -> str:
+        normalized = str(mode or self.SEMANTIC_DISABLED).lower()
+        allowed = {
+            self.SEMANTIC_DISABLED,
+            self.SEMANTIC_SHARED_PRECOMPUTED,
+            self.SEMANTIC_CHECKPOINT_LOADED,
+        }
+        if normalized not in allowed:
+            raise ValueError(
+                "semantic_feature_mode must be one of "
+                f"{sorted(allowed)}; random or untrained projectors are not allowed"
+            )
+        return normalized
+
 
 def _ensure_audio_windows(audio_windows: torch.Tensor) -> torch.Tensor:
     windows = audio_windows
@@ -220,6 +326,19 @@ def _normalize_projected_features(features: torch.Tensor) -> torch.Tensor:
     values = values - values.mean(dim=-1, keepdim=True)
     scale = values.square().mean(dim=-1, keepdim=True).sqrt().clamp_min(1e-6)
     return F.normalize(values / scale, dim=-1, eps=1e-6)
+
+
+def _find_weight(state: dict, keys: Sequence[str]) -> torch.Tensor | None:
+    for key in keys:
+        value = state.get(key)
+        if torch.is_tensor(value):
+            return value.detach().to(dtype=torch.float32)
+    for prefix in ("audio_event_aligner.", "streaming_av_module.audio_event_aligner."):
+        for key in keys:
+            value = state.get(f"{prefix}{key}")
+            if torch.is_tensor(value):
+                return value.detach().to(dtype=torch.float32)
+    return None
 
 
 def _temporal_feature_change(features: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
