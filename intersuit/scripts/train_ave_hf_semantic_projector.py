@@ -65,10 +65,12 @@ class SemanticPair:
 
 
 class AVProjector(nn.Module):
-    def __init__(self, input_dim: int = 768, project_dim: int = 128) -> None:
+    def __init__(self, audio_input_dim: int = 768, video_input_dim: int | None = None, project_dim: int = 128) -> None:
         super().__init__()
-        self.audio_proj = nn.Linear(input_dim, project_dim, bias=False)
-        self.video_proj = nn.Linear(input_dim, project_dim, bias=False)
+        if video_input_dim is None:
+            video_input_dim = audio_input_dim
+        self.audio_proj = nn.Linear(audio_input_dim, project_dim, bias=False)
+        self.video_proj = nn.Linear(video_input_dim, project_dim, bias=False)
         self.log_temperature = nn.Parameter(torch.log(torch.tensor(0.07)))
 
     def encode(self, audio: torch.Tensor, video: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -248,7 +250,7 @@ def train_model(
 ) -> tuple[AVProjector, list[dict[str, Any]]]:
     torch.manual_seed(seed)
     audio, video, labels = collect_tensors(pairs)
-    model = AVProjector(input_dim=audio.shape[-1], project_dim=project_dim)
+    model = AVProjector(audio_input_dim=audio.shape[-1], video_input_dim=video.shape[-1], project_dim=project_dim)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     history = []
     for step in range(1, steps + 1):
@@ -337,7 +339,11 @@ def save_checkpoint(path: Path, model: AVProjector, metadata: dict[str, Any]) ->
         path,
     )
     state = torch.load(path, map_location="cpu", weights_only=True)
-    reloaded = AVProjector(input_dim=state["audio_proj.weight"].shape[1], project_dim=state["audio_proj.weight"].shape[0])
+    reloaded = AVProjector(
+        audio_input_dim=state["audio_proj.weight"].shape[1],
+        video_input_dim=state["video_proj.weight"].shape[1],
+        project_dim=state["audio_proj.weight"].shape[0],
+    )
     with torch.no_grad():
         reloaded.audio_proj.weight.copy_(state["audio_proj.weight"])
         reloaded.video_proj.weight.copy_(state["video_proj.weight"])
@@ -393,7 +399,7 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         f"- rank-first：{validation['evaluation']['rank_first_ratio']}",
         f"- margin mean：{validation['evaluation']['margin_mean']}",
         f"- 分数：`{validation['evaluation']['pair_type_mean_scores']}`",
-        f"- NaN/Inf：{validation['evaluation']['all_scores_finite']}",
+        f"- 无 NaN/Inf：{validation['evaluation']['all_scores_finite']}",
         f"- 分数塌缩：{validation['evaluation']['collapsed_scores']}",
         "",
         "## 结论",

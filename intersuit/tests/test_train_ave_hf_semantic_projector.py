@@ -64,3 +64,12 @@ def test_audit_old_pairs_counts_same_label_wrong_and_shifted(tmp_path):
     assert audit["old_wrong_audio_same_label_count"] == 1
     assert audit["old_shifted_suspect_false_negative_count"] == 1
     assert audit["old_silence_negative_count"] == 1
+
+
+def test_projector_accepts_different_audio_video_input_dims():
+    model = semantic.AVProjector(audio_input_dim=3, video_input_dim=5, project_dim=2)
+
+    score = model.similarity(torch.ones(4, 3), torch.ones(4, 5))
+
+    assert score.shape == (4,)
+    assert torch.isfinite(score).all()
