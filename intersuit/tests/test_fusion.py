@@ -162,8 +162,9 @@ def test_audio_delta_cap_preserves_zero_delta():
 
 
 def test_audio_delta_cap_has_no_nan_or_inf():
-    video = torch.randn(2, 2, 3, 4, dtype=torch.bfloat16)
-    raw_delta = torch.randn(2, 2, 1, 4, dtype=torch.bfloat16)
+    generator = torch.Generator().manual_seed(0)
+    video = torch.randn(2, 2, 3, 4, dtype=torch.bfloat16, generator=generator)
+    raw_delta = torch.randn(2, 2, 1, 4, dtype=torch.bfloat16, generator=generator)
 
     capped, diagnostics = apply_audio_delta_ratio_cap(video, raw_delta, ratio_cap=0.03)
 
