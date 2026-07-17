@@ -7,7 +7,8 @@ train/val 划分；不接 Gate，不修改动态窗口，不修改正式 M4 推�
 
 注意：当前本地 AVE_HF manifest 只有 YouTube segment 的 start_seconds，
 没有可靠的本地事件起止区间。因此本轮候选窗口按 BEATs/CLIP/RGB/能量变化
-峰值筛选，报告中不冒充官方事件边界监督。
+峰值筛选，报告中不冒充官方事件边界监督。v2 默认使用 5-window 上下文，
+并过滤候选间变化强度过于接近的稳定窗口。
 """
 
 from __future__ import annotations
@@ -36,10 +37,11 @@ INTERSUIT_ROOT = REPO_ROOT / "intersuit"
 DEFAULT_CLIP_MANIFEST = INTERSUIT_ROOT / "harness/artifacts/ave_hf_300_clip_window_features/ave_hf_clip_window_feature_manifest.jsonl"
 DEFAULT_RGB_MANIFEST = INTERSUIT_ROOT / "harness/artifacts/ave_hf_300_window_features/ave_hf_window_feature_manifest.jsonl"
 DEFAULT_SPLIT_SUMMARY = INTERSUIT_ROOT / "harness/artifacts/ave_hf_semantic_projector_clip300/semantic_projector_run_summary.json"
-DEFAULT_OUTPUT_ROOT = INTERSUIT_ROOT / "harness/artifacts/ave_hf_temporal_offset_scorer_clip300"
+DEFAULT_OUTPUT_ROOT = INTERSUIT_ROOT / "harness/artifacts/ave_hf_temporal_offset_context_scorer_clip300"
 OFFSETS = (-0.5, 0.0, 0.5)
 CONDITION_TO_BASE_SHIFT = {"original": 0, "shift_plus_0.5": 1, "shift_minus_0.5": -1}
 CONDITION_TO_TARGET = {"original": 1, "shift_plus_0.5": 0, "shift_minus_0.5": 2}
+CONDITIONS = ("original", "shift_plus_0.5", "shift_minus_0.5")
 
 
 def import_semantic_module():
@@ -70,12 +72,13 @@ class OffsetRecord:
     clip_change_strength: float
     rgb_change_strength: float
     energy_change_strength: float
+    candidate_change_margin: float
 
 
 class OffsetScorer(nn.Module):
-    def __init__(self, audio_dim: int, video_dim: int, hidden_dim: int = 128) -> None:
+    def __init__(self, audio_dim: int, video_dim: int, scalar_dim: int, hidden_dim: int = 128) -> None:
         super().__init__()
-        pair_dim = audio_dim + video_dim + 6
+        pair_dim = audio_dim + video_dim + scalar_dim
         self.net = nn.Sequential(
             nn.Linear(pair_dim, hidden_dim),
             nn.ReLU(),
@@ -163,6 +166,38 @@ def neighbor_delta(values: torch.Tensor, index: int) -> torch.Tensor:
     return torch.cat([values[index], values[index] - values[prev_idx], values[next_idx] - values[index]], dim=-1)
 
 
+def context_indices(index: int, length: int, radius: int) -> list[int]:
+    return [max(0, min(length - 1, index + delta)) for delta in range(-radius, radius + 1)]
+
+
+def context_with_deltas(values: torch.Tensor, index: int, radius: int) -> torch.Tensor:
+    indices = context_indices(index, values.shape[0], radius)
+    context = values[indices]
+    deltas = torch.zeros_like(context)
+    if context.shape[0] > 1:
+        step = context[1:] - context[:-1]
+        deltas[1:] = step
+        deltas[:-1] = deltas[:-1] + step
+    return torch.cat([context.reshape(-1), deltas.reshape(-1)], dim=0)
+
+
+def scalar_context(cache: dict[str, Any], audio_index: int, video_index: int, radius: int) -> torch.Tensor:
+    audio_indices = context_indices(audio_index, cache["audio"].shape[0], radius)
+    video_indices = context_indices(video_index, cache["clip"].shape[0], radius)
+    values = torch.stack(
+        [
+            cache["rms"][audio_indices],
+            cache["nonsilent"][audio_indices],
+            cache["audio_change"][audio_indices],
+            cache["energy_change"][audio_indices],
+            cache["clip_change"][video_indices],
+            cache["rgb_change"][video_indices],
+        ],
+        dim=1,
+    )
+    return values.reshape(-1)
+
+
 def build_row_cache(clip_row: dict[str, Any], rgb_row: dict[str, Any]) -> dict[str, Any]:
     audio, audio_ts = load_feature(Path(clip_row["audio_feature_path"]), "audio_embedding")
     clip, clip_ts = load_feature(Path(clip_row["video_feature_path"]), "video_features")
@@ -228,19 +263,37 @@ def select_change_windows(cache: dict[str, Any], top_k: int, min_change_quantile
     return selected
 
 
-def build_records(caches: list[dict[str, Any]], split_ids: set[str], top_k: int, min_change_quantile: float) -> list[OffsetRecord]:
+def candidate_change_margin(cache: dict[str, Any], candidate_windows: list[int]) -> float:
+    values = cache["audio_change"][candidate_windows] + cache["energy_change"][candidate_windows]
+    return float((values.max() - values.min()).item())
+
+
+def build_records(
+    caches: list[dict[str, Any]],
+    split_ids: set[str],
+    top_k: int,
+    min_change_quantile: float,
+    min_candidate_change_margin: float,
+) -> list[OffsetRecord]:
     records: list[OffsetRecord] = []
     for cache in caches:
         if cache["youtube_id"] not in split_ids:
             continue
         for window_idx, boundary_type in select_change_windows(cache, top_k, min_change_quantile):
-            for condition, base_shift in CONDITION_TO_BASE_SHIFT.items():
+            per_condition: list[OffsetRecord] = []
+            for condition in CONDITIONS:
+                base_shift = CONDITION_TO_BASE_SHIFT[condition]
                 base = window_idx + base_shift
                 candidate_windows = [base - 1, base, base + 1]
                 if min(candidate_windows) < 0 or max(candidate_windows) >= cache["audio"].shape[0]:
-                    continue
+                    per_condition = []
+                    break
+                change_margin = candidate_change_margin(cache, candidate_windows)
+                if change_margin < min_candidate_change_margin:
+                    per_condition = []
+                    break
                 target_index = CONDITION_TO_TARGET[condition]
-                records.append(
+                per_condition.append(
                     OffsetRecord(
                         youtube_id=cache["youtube_id"],
                         label=cache["label"],
@@ -255,14 +308,35 @@ def build_records(caches: list[dict[str, Any]], split_ids: set[str], top_k: int,
                         clip_change_strength=float(cache["clip_change"][window_idx].item()),
                         rgb_change_strength=float(cache["rgb_change"][window_idx].item()),
                         energy_change_strength=float(cache["energy_change"][window_idx].item()),
+                        candidate_change_margin=change_margin,
                     )
                 )
+            if len(per_condition) == len(CONDITIONS):
+                records.extend(per_condition)
     return records
+
+
+def balance_records_by_target(records: list[OffsetRecord], seed: int) -> list[OffsetRecord]:
+    rng = random.Random(seed)
+    by_target: dict[int, list[OffsetRecord]] = defaultdict(list)
+    for record in records:
+        by_target[record.target_index].append(record)
+    if set(by_target) != {0, 1, 2}:
+        raise ValueError(f"offset 类别不完整：{sorted(by_target)}")
+    count = min(len(items) for items in by_target.values())
+    balanced: list[OffsetRecord] = []
+    for target in sorted(by_target):
+        items = list(by_target[target])
+        rng.shuffle(items)
+        balanced.extend(items[:count])
+    rng.shuffle(balanced)
+    return balanced
 
 
 def make_tensor_dataset(
     records: list[OffsetRecord],
     cache_by_id: dict[str, dict[str, Any]],
+    context_radius: int,
     scalar_stats: tuple[torch.Tensor, torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[OffsetRecord], tuple[torch.Tensor, torch.Tensor]]:
     audio_rows, video_rows, scalar_rows, targets = [], [], [], []
@@ -270,22 +344,17 @@ def make_tensor_dataset(
     for record in records:
         cache = cache_by_id[record.youtube_id]
         video_idx = record.video_window
-        video_context = torch.cat([neighbor_delta(cache["clip"], video_idx), neighbor_delta(cache["rgb"], video_idx)], dim=-1)
+        video_context = torch.cat(
+            [
+                context_with_deltas(cache["clip"], video_idx, context_radius),
+                context_with_deltas(cache["rgb"], video_idx, context_radius),
+            ],
+            dim=-1,
+        )
         candidate_audio, candidate_scalars = [], []
         for cand_idx in record.audio_candidate_windows:
-            candidate_audio.append(neighbor_delta(cache["audio"], cand_idx))
-            scalar = torch.tensor(
-                [
-                    cache["rms"][cand_idx],
-                    cache["nonsilent"][cand_idx],
-                    cache["audio_change"][cand_idx],
-                    cache["clip_change"][video_idx],
-                    cache["rgb_change"][video_idx],
-                    cache["energy_change"][cand_idx],
-                ],
-                dtype=torch.float32,
-            )
-            candidate_scalars.append(scalar)
+            candidate_audio.append(context_with_deltas(cache["audio"], cand_idx, context_radius))
+            candidate_scalars.append(scalar_context(cache, cand_idx, video_idx, context_radius))
         audio_rows.append(torch.stack(candidate_audio))
         video_rows.append(video_context)
         scalar_rows.append(torch.stack(candidate_scalars))
@@ -320,7 +389,7 @@ def train_model(
 ) -> tuple[OffsetScorer, list[dict[str, Any]]]:
     torch.manual_seed(seed)
     rng = random.Random(seed)
-    model = OffsetScorer(audio_dim=audio.shape[-1], video_dim=video.shape[-1], hidden_dim=hidden_dim)
+    model = OffsetScorer(audio_dim=audio.shape[-1], video_dim=video.shape[-1], scalar_dim=scalars.shape[-1], hidden_dim=hidden_dim)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     history = []
     for step in range(1, steps + 1):
@@ -410,6 +479,8 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         f"- 固定基线提交：`e5b5df3`",
         f"- train/val split：来自 `{summary['config']['split_summary']}`",
         f"- 候选窗口来源：BEATs/CLIP/RGB/能量变化峰值；本地 manifest 缺少可靠 AVE 事件起止字段，因此未使用官方边界监督。",
+        f"- 上下文窗口数：{summary['config']['context_window_count']}",
+        f"- 候选变化强度最小差距：{summary['config']['min_candidate_change_margin']}",
         f"- train 样本数：{summary['manifest_summary']['train_count']}",
         f"- val 样本数：{summary['manifest_summary']['val_count']}",
         f"- offset 分布：`{summary['manifest_summary']['target_offset_counts']}`",
@@ -454,13 +525,31 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     cache_by_id = {cache["youtube_id"]: cache for cache in caches}
     train_ids = set(split_summary["split"]["train_ids"])
     val_ids = set(split_summary["split"]["val_ids"])
-    train_records = build_records(caches, train_ids, top_k=args.top_k_windows, min_change_quantile=args.min_change_quantile)
-    val_records = build_records(caches, val_ids, top_k=args.top_k_windows, min_change_quantile=args.min_change_quantile)
+    train_records = build_records(
+        caches,
+        train_ids,
+        top_k=args.top_k_windows,
+        min_change_quantile=args.min_change_quantile,
+        min_candidate_change_margin=args.min_candidate_change_margin,
+    )
+    val_records = build_records(
+        caches,
+        val_ids,
+        top_k=args.top_k_windows,
+        min_change_quantile=args.min_change_quantile,
+        min_candidate_change_margin=args.min_candidate_change_margin,
+    )
+    train_records = balance_records_by_target(train_records, seed=args.seed)
+    val_records = balance_records_by_target(val_records, seed=args.seed)
     write_jsonl(output_root / "temporal_offset_train_manifest.jsonl", train_records)
     write_jsonl(output_root / "temporal_offset_val_manifest.jsonl", val_records)
 
-    train_audio, train_video, train_scalars, train_targets, train_records, scalar_stats = make_tensor_dataset(train_records, cache_by_id)
-    val_audio, val_video, val_scalars, val_targets, val_records, _ = make_tensor_dataset(val_records, cache_by_id, scalar_stats=scalar_stats)
+    train_audio, train_video, train_scalars, train_targets, train_records, scalar_stats = make_tensor_dataset(
+        train_records, cache_by_id, context_radius=args.context_radius
+    )
+    val_audio, val_video, val_scalars, val_targets, val_records, _ = make_tensor_dataset(
+        val_records, cache_by_id, context_radius=args.context_radius, scalar_stats=scalar_stats
+    )
     epoch_steps = math.ceil(train_targets.numel() / args.batch_equivalent_size)
     runs = []
     for name, steps in [("2step", 2), ("overfit_small", args.overfit_steps), ("20step", 20), ("one_epoch", epoch_steps)]:
@@ -516,6 +605,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "output_root": str(output_root),
             "top_k_windows": args.top_k_windows,
             "min_change_quantile": args.min_change_quantile,
+            "min_candidate_change_margin": args.min_candidate_change_margin,
+            "context_radius": args.context_radius,
+            "context_window_count": args.context_radius * 2 + 1,
             "hidden_dim": args.hidden_dim,
             "lr": args.lr,
             "seed": args.seed,
@@ -539,6 +631,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT))
     parser.add_argument("--top-k-windows", type=int, default=4)
     parser.add_argument("--min-change-quantile", type=float, default=0.6)
+    parser.add_argument("--min-candidate-change-margin", type=float, default=0.5)
+    parser.add_argument("--context-radius", type=int, default=2)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=20260718)
