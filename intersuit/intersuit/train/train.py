@@ -125,6 +125,7 @@ class ModelArguments:
     audio_event_local_offset_sec: float = field(default=0.5)
     audio_event_silence_threshold: float = field(default=1e-4)
     audio_event_rms_reference: float = field(default=0.05)
+    audio_event_strength_weight: float = field(default=0.05)
 
     rope_scaling_factor: Optional[float] = field(default=None)
     rope_scaling_type: Optional[str] = field(default=None)

@@ -36,7 +36,8 @@ class StreamingAVModule(nn.Module):
         )
         local_offset_sec = float(getattr(config, "audio_event_local_offset_sec", 0.5))
         self.audio_event_aligner = LocalAudioEventAligner(
-            candidate_offsets=(-local_offset_sec, 0.0, local_offset_sec)
+            candidate_offsets=(-local_offset_sec, 0.0, local_offset_sec),
+            event_strength_weight=float(getattr(config, "audio_event_strength_weight", 0.05)),
         )
         self.confidence_gate = AudioConfidenceGate(
             hidden_size,

@@ -82,6 +82,22 @@ def test_best_offset_and_alignment_margin_select_matching_window():
     assert output.alignment_confidence.item() > 0.0
 
 
+def test_semantic_similarity_dominates_event_strength():
+    aligner = LocalAudioEventAligner(event_strength_weight=0.05)
+    audio = torch.tensor([[[0.0, 1.0, -1.0, 0.0], [1.0, -1.0, 0.0, 0.0], [0.0, 1.0, -1.0, 0.0]]])
+    video = audio[:, 1:2].unsqueeze(2)
+    audio_times = _timestamps(3)
+    video_times = torch.tensor([0.5])
+    events = compute_audio_event_features(torch.ones(1, 3, 80) * 0.1, audio_features=audio)
+    events = events._replace(event_strength=torch.tensor([[1.0, 0.1, 1.0]]))
+
+    output = aligner(audio, video, audio_times, video_times, events)
+
+    assert output.best_offset.item() == 0.0
+    assert output.semantic_similarity[0, 0, 1] > output.semantic_similarity[0, 0, 0]
+    assert output.semantic_similarity[0, 0, 1] > output.semantic_similarity[0, 0, 2]
+
+
 def test_silent_candidates_have_zero_score_margin_and_confidence():
     aligner = LocalAudioEventAligner()
     audio = torch.randn(1, 3, 4)

@@ -23,6 +23,8 @@ class LocalAudioAlignmentOutput(NamedTuple):
     candidate_offsets: torch.Tensor
     candidate_indices: torch.Tensor
     candidate_valid: torch.Tensor
+    semantic_similarity: torch.Tensor
+    video_event_strength: torch.Tensor
     candidate_scores: torch.Tensor
     best_offset: torch.Tensor
     best_alignment_score: torch.Tensor
@@ -82,14 +84,21 @@ def compute_audio_event_features(
 class LocalAudioEventAligner(nn.Module):
     """Score nearby audio windows without changing the fused audio window."""
 
-    def __init__(self, candidate_offsets: Sequence[float] = (-0.5, 0.0, 0.5)) -> None:
+    def __init__(
+        self,
+        candidate_offsets: Sequence[float] = (-0.5, 0.0, 0.5),
+        event_strength_weight: float = 0.05,
+    ) -> None:
         super().__init__()
         offsets = tuple(float(value) for value in candidate_offsets)
         if len(offsets) < 2:
             raise ValueError("candidate_offsets must contain at least two values")
         if 0.0 not in offsets:
             raise ValueError("candidate_offsets must include 0.0")
+        if event_strength_weight < 0:
+            raise ValueError("event_strength_weight must be non-negative")
         self.candidate_offsets = offsets
+        self.event_strength_weight = float(event_strength_weight)
 
     def forward(
         self,
@@ -137,14 +146,20 @@ class LocalAudioEventAligner(nn.Module):
             2,
             candidate_indices,
         )
-        similarity = F.cosine_similarity(candidate_audio, video.unsqueeze(2), dim=-1, eps=1e-6)
-        similarity_score = ((similarity + 1.0) * 0.5).clamp(0.0, 1.0)
+        video_event_strength = _temporal_feature_change(video, v_mask)
+        audio_key = _normalize_projected_features(candidate_audio)
+        video_key = _normalize_projected_features(video).unsqueeze(2)
+        semantic_similarity = F.cosine_similarity(audio_key, video_key, dim=-1, eps=1e-6)
+        semantic_score = ((semantic_similarity + 1.0) * 0.5).clamp(0.0, 1.0)
+        event_match = 1.0 - (candidate_strength - video_event_strength.unsqueeze(-1)).abs().clamp(0.0, 1.0)
         candidate_scores = torch.nan_to_num(
-            candidate_strength * similarity_score,
+            semantic_score
+            + self.event_strength_weight * (0.5 * event_match + 0.5 * candidate_strength),
             nan=0.0,
             posinf=1.0,
             neginf=0.0,
         ).masked_fill(~candidate_valid, 0.0)
+        candidate_scores = candidate_scores.masked_fill(candidate_strength <= 0.0, 0.0)
 
         tie_break = offsets.abs().view(1, 1, -1) * 1e-6
         selection_scores = (candidate_scores - tie_break).masked_fill(~candidate_valid, -1e9)
@@ -166,6 +181,8 @@ class LocalAudioEventAligner(nn.Module):
             candidate_offsets=offsets.view(1, 1, -1).expand(batch, video_steps, -1),
             candidate_indices=candidate_indices,
             candidate_valid=candidate_valid,
+            semantic_similarity=semantic_similarity.masked_fill(~candidate_valid, 0.0),
+            video_event_strength=video_event_strength,
             candidate_scores=candidate_scores,
             best_offset=best_offset,
             best_alignment_score=best_score,
@@ -196,6 +213,27 @@ def _ensure_features(features: torch.Tensor) -> torch.Tensor:
 def _summarize_video(video_features: torch.Tensor) -> torch.Tensor:
     values = video_features.mean(dim=2) if video_features.ndim == 4 else video_features
     return _ensure_features(values)
+
+
+def _normalize_projected_features(features: torch.Tensor) -> torch.Tensor:
+    values = torch.nan_to_num(features.float(), nan=0.0, posinf=0.0, neginf=0.0)
+    values = values - values.mean(dim=-1, keepdim=True)
+    scale = values.square().mean(dim=-1, keepdim=True).sqrt().clamp_min(1e-6)
+    return F.normalize(values / scale, dim=-1, eps=1e-6)
+
+
+def _temporal_feature_change(features: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    change = torch.zeros(features.shape[:2], device=features.device, dtype=torch.float32)
+    if features.shape[1] <= 1:
+        return change
+    pair_valid = mask[:, 1:] & mask[:, :-1]
+    numerator = (features[:, 1:] - features[:, :-1]).norm(dim=-1)
+    denominator = features[:, 1:].norm(dim=-1) + features[:, :-1].norm(dim=-1) + 1e-6
+    pair_change = (numerator / denominator).clamp(0.0, 1.0)
+    pair_change = torch.where(pair_valid, pair_change, torch.zeros_like(pair_change))
+    change[:, 1:] = torch.maximum(change[:, 1:], pair_change)
+    change[:, :-1] = torch.maximum(change[:, :-1], pair_change)
+    return change
 
 
 def _ensure_times(

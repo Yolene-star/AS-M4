@@ -210,6 +210,7 @@ class LlavaMetaModel:
             model_args, "audio_event_silence_threshold", 1e-4
         )
         self.config.audio_event_rms_reference = getattr(model_args, "audio_event_rms_reference", 0.05)
+        self.config.audio_event_strength_weight = getattr(model_args, "audio_event_strength_weight", 0.05)
 
         if self.get_scene_audio_encoder() is None:
             scene_audio_encoder = build_scene_audio_encoder(self.config)
@@ -555,6 +556,8 @@ class LlavaMetaForCausalLM(ABC):
                         "audio_peak": event_features.audio_peak.detach(),
                         "candidate_offsets": local_alignment.candidate_offsets.detach(),
                         "candidate_valid": local_alignment.candidate_valid.detach(),
+                        "semantic_similarity": local_alignment.semantic_similarity.detach(),
+                        "video_event_strength": local_alignment.video_event_strength.detach(),
                         "candidate_scores": local_alignment.candidate_scores.detach(),
                         "best_offset": local_alignment.best_offset.detach(),
                         "best_alignment_score": local_alignment.best_alignment_score.detach(),
