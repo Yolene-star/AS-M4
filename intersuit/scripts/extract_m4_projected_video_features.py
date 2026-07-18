@@ -43,7 +43,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     for qa in rows:
         sample_id = str(qa["id"])
         output_path = output_root / "features" / f"{sample_id}.pt"
-        if args.resume and output_path.is_file():
+        reused = bool(args.resume and output_path.is_file())
+        if reused:
             payload = torch.load(output_path, map_location="cpu", weights_only=True)
             features = payload.get("features") if isinstance(payload, dict) else payload
             if not isinstance(features, torch.Tensor):
@@ -82,6 +83,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         row.pop("video_path", None)
         output_rows.append(row)
         shapes[sample_id] = list(features.shape)
+        print(
+            json.dumps(
+                {
+                    "sample_id": sample_id,
+                    "status": "reused" if reused else "extracted",
+                    "shape": shapes[sample_id],
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
     manifest_path = output_root / "m4_projected_video_feature_manifest.json"
     write_json(manifest_path, output_rows)
     summary = {

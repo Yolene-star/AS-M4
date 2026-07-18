@@ -72,10 +72,29 @@ def window_audio_event_stats(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     from intersuit.streaming.audio_stream import load_scene_audio
 
-    values, rate = load_scene_audio(Path(audio_path), sample_rate=16000, mono=True)
-    if values.ndim == 2:
-        values = values[0]
-    values = values.float()
+    path = Path(audio_path)
+    try:
+        values, rate = load_scene_audio(path, sample_rate=16000, mono=True)
+        if values.ndim == 2:
+            values = values[0]
+        values = values.float()
+    except RuntimeError:
+        if path.suffix.lower() != ".wav":
+            raise
+        from scipy.io import wavfile
+
+        rate, raw = wavfile.read(path)
+        values = torch.as_tensor(raw)
+        integer_dtype = not values.dtype.is_floating_point
+        info = torch.iinfo(values.dtype) if integer_dtype else None
+        if values.ndim == 2:
+            values = values.float().mean(dim=1)
+        else:
+            values = values.float()
+        if info is not None:
+            values = values / float(max(abs(info.min), abs(info.max)))
+        if rate != 16000:
+            raise ValueError(f"诊断 WAV 采样率必须为 16000：{path}")
     windows = []
     for start, end in timestamps.tolist():
         left = max(0, int(round(start * rate)))
@@ -143,11 +162,18 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             audio_ts, rgb_ts, atol=1e-5, rtol=0.0
         ):
             raise ValueError(f"{youtube_id} 三路时间戳不一致")
-        rms, nonsilent, event_strength = window_audio_event_stats(
-            rgb_row["audio_path"],
-            audio_ts,
-            audio,
-        )
+        audio_condition = str(rgb_row.get("audio_condition", "original"))
+        if audio_condition == "silence":
+            audio = torch.zeros_like(audio)
+            rms = torch.zeros(audio.shape[0], dtype=torch.float32)
+            nonsilent = torch.zeros_like(rms)
+            event_strength = torch.zeros_like(rms)
+        else:
+            rms, nonsilent, event_strength = window_audio_event_stats(
+                rgb_row["audio_path"],
+                audio_ts,
+                audio,
+            )
         output = scorer(
             FrozenOffsetScorerInputs(
                 audio.unsqueeze(0),
@@ -166,6 +192,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             {
                 "youtube_id": youtube_id,
                 "label": clip_row.get("label"),
+                "evaluation_category": rgb_row.get("evaluation_category"),
+                "audio_condition": audio_condition,
+                "audio_donor_youtube_id": rgb_row.get("audio_donor_youtube_id"),
                 "window_count": len(raw),
                 "candidate_offsets": [-0.5, 0.0, 0.5],
                 "candidate_scores": scores,

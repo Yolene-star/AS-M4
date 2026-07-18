@@ -25,7 +25,7 @@ SPEC.loader.exec_module(prepare)
 def test_prepare_four_conditions_and_exact_fallbacks(tmp_path):
     feature_root = tmp_path / "source"
     feature_root.mkdir()
-    features = torch.arange(20, dtype=torch.float32).reshape(5, 2, 2)
+    features = torch.arange(20, dtype=torch.bfloat16).reshape(5, 2, 2)
     torch.save({"features": features}, feature_root / "sample.pt")
     qa_manifest = tmp_path / "qa.json"
     qa_manifest.write_text(
@@ -34,6 +34,7 @@ def test_prepare_four_conditions_and_exact_fallbacks(tmp_path):
                 {
                     "id": "sample",
                     "video_features": "sample.pt",
+                    "evaluation_category": "audio_necessary",
                     "conversations": [
                         {"from": "human", "value": "<image>\nQuestion?"},
                         {"from": "gpt", "value": "Answer"},
@@ -84,6 +85,20 @@ def test_prepare_four_conditions_and_exact_fallbacks(tmp_path):
     ]
     assert [row["id"] for row in plan] == list(prepare.MODES)
     assert all(row["env"]["AS_M4_ENABLE_SCENE_AUDIO"] == "0" for row in plan)
+    category_plan = [
+        json.loads(line)
+        for line in (output_root / "ablation_plan_by_category.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+    ]
+    assert len(category_plan) == len(prepare.MODES)
+    assert all("audio_necessary" in row["id"] for row in category_plan)
+    weighted = torch.load(
+        output_root / "features/offset_soft/sample.pt",
+        map_location="cpu",
+        weights_only=True,
+    )
+    assert weighted["features"].dtype == torch.bfloat16
 
 
 def test_frozen_scorer_configuration_cannot_change(tmp_path):

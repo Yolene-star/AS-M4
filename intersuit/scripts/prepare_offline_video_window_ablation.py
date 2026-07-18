@@ -48,7 +48,9 @@ def load_feature(path: Path) -> torch.Tensor:
         payload = payload.get("features", payload.get("video_features"))
     if not isinstance(payload, torch.Tensor) or payload.ndim < 2:
         raise ValueError(f"视频特征必须是 [T,...] tensor：{path}")
-    values = payload.float()
+    values = payload.detach()
+    if not values.is_floating_point():
+        raise ValueError(f"视频特征必须是浮点 tensor：{path}")
     if not torch.isfinite(values).all():
         raise ValueError(f"视频特征包含 NaN/Inf：{path}")
     return values
@@ -211,6 +213,15 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             )
 
     plan_rows = []
+    category_plan_rows = []
+    categories = sorted(
+        {
+            str(row["evaluation_category"])
+            for rows in manifests.values()
+            for row in rows
+            if row.get("evaluation_category")
+        }
+    )
     for mode in MODES:
         manifest_path = output_root / "manifests" / f"{mode}.json"
         write_json(manifest_path, manifests[mode])
@@ -239,8 +250,36 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "output_jsonl": str(output_root / "predictions" / f"{mode}.jsonl"),
             }
         )
+        for category in categories:
+            category_manifest = (
+                output_root / "manifests" / "by_category" / f"{mode}__{category}.json"
+            )
+            write_json(
+                category_manifest,
+                [
+                    row
+                    for row in manifests[mode]
+                    if str(row.get("evaluation_category")) == category
+                ],
+            )
+            category_plan_rows.append(
+                {
+                    **plan_rows[-1],
+                    "id": f"{mode}__{category}",
+                    "description": f"离线视频时间窗口消融：{mode} / {category}",
+                    "manifest": str(category_manifest),
+                    "output_jsonl": str(
+                        output_root
+                        / "predictions_by_category"
+                        / f"{mode}__{category}.jsonl"
+                    ),
+                }
+            )
     plan_path = output_root / "ablation_plan.jsonl"
     write_jsonl(plan_path, plan_rows)
+    category_plan_path = output_root / "ablation_plan_by_category.jsonl"
+    if category_plan_rows:
+        write_jsonl(category_plan_path, category_plan_rows)
 
     summary = {
         "diagnostic_only": True,
@@ -259,6 +298,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "all_finite": all(item["finite"] for item in stats.values()),
         "paths": {
             "plan": str(plan_path),
+            "category_plan": str(category_plan_path) if category_plan_rows else None,
             "summary": str(output_root / "preparation_summary.json"),
             "report": str(output_root / "preparation_report.md"),
         },
