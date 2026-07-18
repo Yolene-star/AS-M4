@@ -28,6 +28,12 @@ DIAGNOSTIC_KEYS = (
     "second_best_alignment_score",
     "alignment_margin",
     "alignment_confidence",
+    "offset_scorer_candidate_scores",
+    "offset_scorer_best_offset",
+    "offset_scorer_margin",
+    "offset_scorer_accepted",
+    "offset_scorer_suggested_offset",
+    "offset_scorer_available",
 )
 
 CONDITION_LABELS = {
@@ -107,6 +113,27 @@ def offset_distribution(value: Any) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def true_ratio(value: Any) -> float | None:
+    if not isinstance(value, list):
+        return None
+    flattened = []
+    stack = list(value)
+    while stack:
+        item = stack.pop()
+        if isinstance(item, list):
+            stack.extend(item)
+        elif isinstance(item, bool):
+            flattened.append(item)
+    return mean(flattened) if flattened else None
+
+
+def offset_jump_rate(value: Any) -> float | None:
+    values = [number for number in flatten_numbers(value) if math.isfinite(number)]
+    if len(values) < 2:
+        return 0.0 if values else None
+    return sum(left != right for left, right in zip(values, values[1:])) / (len(values) - 1)
+
+
 def count_non_finite(value: Any) -> tuple[int, int]:
     nan_count = 0
     inf_count = 0
@@ -138,6 +165,12 @@ def summarize_row(row: dict[str, Any]) -> dict[str, Any]:
                 "event_strength_mean": None,
                 "event_strength_max": None,
                 "best_offset_distribution": {},
+                "suggested_offset_distribution": {},
+                "offset_scorer_best_offset_distribution": {},
+                "offset_scorer_available_ratio": None,
+                "offset_scorer_accepted_ratio": None,
+                "offset_scorer_margin_mean": None,
+                "offset_scorer_jump_rate": None,
                 "alignment_score_mean": None,
                 "alignment_margin_mean": None,
                 "alignment_confidence_mean": None,
@@ -157,6 +190,18 @@ def summarize_row(row: dict[str, Any]) -> dict[str, Any]:
             "alignment_score_mean": numeric_mean(diagnostic.get("best_alignment_score")),
             "alignment_margin_mean": numeric_mean(diagnostic.get("alignment_margin")),
             "alignment_confidence_mean": numeric_mean(diagnostic.get("alignment_confidence")),
+            "offset_scorer_available_ratio": true_ratio(diagnostic.get("offset_scorer_available")),
+            "offset_scorer_accepted_ratio": true_ratio(diagnostic.get("offset_scorer_accepted")),
+            "offset_scorer_best_offset_distribution": offset_distribution(
+                diagnostic.get("offset_scorer_best_offset")
+            ),
+            "suggested_offset_distribution": offset_distribution(
+                diagnostic.get("offset_scorer_suggested_offset")
+            ),
+            "offset_scorer_margin_mean": numeric_mean(diagnostic.get("offset_scorer_margin")),
+            "offset_scorer_jump_rate": offset_jump_rate(
+                diagnostic.get("offset_scorer_suggested_offset")
+            ),
             "nan_count": nan_count,
             "inf_count": inf_count,
         }
@@ -287,6 +332,12 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "alignment_score_mean",
         "alignment_margin_mean",
         "alignment_confidence_mean",
+        "offset_scorer_available_ratio",
+        "offset_scorer_accepted_ratio",
+        "offset_scorer_margin_mean",
+        "offset_scorer_best_offset_distribution",
+        "suggested_offset_distribution",
+        "offset_scorer_jump_rate",
         "nan_count",
         "inf_count",
     )
@@ -296,6 +347,16 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         for row in rows:
             output = {key: row.get(key) for key in fields}
             output["best_offset_distribution"] = json.dumps(output["best_offset_distribution"], ensure_ascii=False, sort_keys=True)
+            output["offset_scorer_best_offset_distribution"] = json.dumps(
+                output["offset_scorer_best_offset_distribution"],
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            output["suggested_offset_distribution"] = json.dumps(
+                output["suggested_offset_distribution"],
+                ensure_ascii=False,
+                sort_keys=True,
+            )
             writer.writerow(output)
 
 
@@ -330,6 +391,43 @@ def write_report(
                 margin=_format_number(item.get("alignment_margin_mean")),
                 confidence=_format_number(item.get("alignment_confidence_mean")),
                 offsets=json.dumps(item.get("best_offset_distribution") or {}, ensure_ascii=False, sort_keys=True),
+            )
+        )
+    scorer_rows = [
+        item
+        for item in [*single_summaries, *five_summaries]
+        if (item.get("offset_scorer_available_ratio") or 0.0) > 0
+    ]
+    lines.extend(
+        [
+            "",
+            "## 冻结 offset scorer 诊断旁路",
+            "",
+            "该表只记录建议，不移动音频窗口，也不把结果接入 Gate。",
+            "",
+            "| 样本/条件 | 可用率 | 接受率 | margin 均值 | raw offset 分布 | 建议 offset 分布 | 相邻建议跳变率 |",
+            "|---|---:|---:|---:|---|---|---:|",
+        ]
+    )
+    for item in scorer_rows:
+        lines.append(
+            "| {sample}/{condition} | {available} | {accepted} | {margin} | `{raw}` | `{suggested}` | {jump} |".format(
+                sample=item.get("sample_id"),
+                condition=item.get("condition"),
+                available=_format_number(item.get("offset_scorer_available_ratio")),
+                accepted=_format_number(item.get("offset_scorer_accepted_ratio")),
+                margin=_format_number(item.get("offset_scorer_margin_mean")),
+                raw=json.dumps(
+                    item.get("offset_scorer_best_offset_distribution") or {},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                suggested=json.dumps(
+                    item.get("suggested_offset_distribution") or {},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                jump=_format_number(item.get("offset_scorer_jump_rate")),
             )
         )
 

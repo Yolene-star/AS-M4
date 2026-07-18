@@ -32,6 +32,224 @@ class LocalAudioAlignmentOutput(NamedTuple):
     second_best_alignment_score: torch.Tensor
     alignment_margin: torch.Tensor
     alignment_confidence: torch.Tensor
+    offset_scorer_candidate_scores: torch.Tensor
+    offset_scorer_best_offset: torch.Tensor
+    offset_scorer_margin: torch.Tensor
+    offset_scorer_accepted: torch.Tensor
+    offset_scorer_suggested_offset: torch.Tensor
+    offset_scorer_available: torch.Tensor
+
+
+class FrozenOffsetScorerInputs(NamedTuple):
+    """Exact frozen feature streams required by the accepted AVE scorer."""
+
+    audio_features: torch.Tensor
+    clip_features: torch.Tensor
+    rgb_features: torch.Tensor
+    audio_rms: torch.Tensor
+    non_silent_ratio: torch.Tensor
+
+
+class FrozenOffsetScorerOutput(NamedTuple):
+    candidate_scores: torch.Tensor
+    best_offset: torch.Tensor
+    margin: torch.Tensor
+    accepted: torch.Tensor
+    suggested_offset: torch.Tensor
+    available: torch.Tensor
+
+
+class FrozenTemporalOffsetScorer(nn.Module):
+    """Frozen diagnostic scorer matching the accepted AVE feature schema."""
+
+    FORMAT_VERSION = 1
+
+    def __init__(self, bundle_path: str | Path, margin_threshold: float = 0.15) -> None:
+        super().__init__()
+        if margin_threshold < 0:
+            raise ValueError("margin_threshold must be non-negative")
+        path = Path(bundle_path)
+        if not path.is_file():
+            raise FileNotFoundError(f"Frozen offset scorer bundle not found: {path}")
+        bundle = torch.load(path, map_location="cpu", weights_only=True)
+        if int(bundle.get("format_version", -1)) != self.FORMAT_VERSION:
+            raise ValueError("Unsupported frozen offset scorer bundle format")
+        metadata = bundle.get("metadata")
+        state = bundle.get("state_dict")
+        scalar_mean = bundle.get("scalar_mean")
+        scalar_std = bundle.get("scalar_std")
+        if not isinstance(metadata, dict) or not isinstance(state, dict):
+            raise ValueError("Frozen offset scorer bundle is missing metadata/state_dict")
+        if not torch.is_tensor(scalar_mean) or not torch.is_tensor(scalar_std):
+            raise ValueError("Frozen offset scorer bundle is missing scalar normalization statistics")
+
+        self.audio_dim = int(metadata["audio_dim"])
+        self.clip_dim = int(metadata["clip_dim"])
+        self.rgb_dim = int(metadata["rgb_dim"])
+        self.context_radius = int(metadata["context_radius"])
+        self.scalar_dim = int(metadata["scalar_dim"])
+        self.hidden_dim = int(metadata["hidden_dim"])
+        if "seed" in metadata and int(metadata["seed"]) != 20260719:
+            raise ValueError("Frozen offset scorer bundle must use accepted seed 20260719")
+        if "margin_threshold" in metadata and abs(
+            float(metadata["margin_threshold"]) - float(margin_threshold)
+        ) > 1e-12:
+            raise ValueError(
+                "Frozen offset scorer margin threshold is locked by the runtime bundle: "
+                f"{metadata['margin_threshold']}"
+            )
+        if "zero_class_weight" in metadata and float(metadata["zero_class_weight"]) != 1.25:
+            raise ValueError("Frozen offset scorer bundle must keep zero_class_weight=1.25")
+        if "require_center_peak" in metadata and not bool(metadata["require_center_peak"]):
+            raise ValueError("Frozen offset scorer bundle must keep center-peak filtering")
+        offsets = tuple(float(value) for value in metadata["candidate_offsets"])
+        if offsets != (-0.5, 0.0, 0.5):
+            raise ValueError(f"Frozen scorer candidate offsets are not accepted: {offsets}")
+        context_count = self.context_radius * 2 + 1
+        pair_dim = (
+            context_count * self.audio_dim * 2
+            + context_count * (self.clip_dim + self.rgb_dim) * 2
+            + self.scalar_dim
+        )
+        first_weight = state.get("net.0.weight")
+        if not torch.is_tensor(first_weight) or tuple(first_weight.shape) != (self.hidden_dim, pair_dim):
+            raise ValueError(
+                f"Frozen scorer input shape mismatch: expected {(self.hidden_dim, pair_dim)}, "
+                f"got {None if not torch.is_tensor(first_weight) else tuple(first_weight.shape)}"
+            )
+        if scalar_mean.numel() != self.scalar_dim or scalar_std.numel() != self.scalar_dim:
+            raise ValueError("Frozen scorer scalar statistics do not match scalar_dim")
+
+        self.net = nn.Sequential(
+            nn.Linear(pair_dim, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, 1),
+        )
+        self.net.load_state_dict(
+            {
+                (key[len("net.") :] if key.startswith("net.") else key): value
+                for key, value in state.items()
+            }
+        )
+        for parameter in self.parameters():
+            parameter.requires_grad = False
+        self.register_buffer("scalar_mean", scalar_mean.float().reshape(self.scalar_dim), persistent=True)
+        self.register_buffer("scalar_std", scalar_std.float().reshape(self.scalar_dim).clamp_min(1e-6), persistent=True)
+        self.register_buffer("candidate_offsets", torch.tensor(offsets, dtype=torch.float32), persistent=True)
+        self.margin_threshold = float(margin_threshold)
+        self.bundle_path = str(path.resolve())
+        self.bundle_metadata = metadata
+
+    @torch.no_grad()
+    def forward(self, inputs: FrozenOffsetScorerInputs) -> FrozenOffsetScorerOutput:
+        audio = _ensure_frozen_stream(inputs.audio_features, self.audio_dim, "audio")
+        clip = _ensure_frozen_stream(inputs.clip_features, self.clip_dim, "clip")
+        rgb = _ensure_frozen_stream(inputs.rgb_features, self.rgb_dim, "rgb")
+        if audio.shape[:2] != clip.shape[:2] or audio.shape[:2] != rgb.shape[:2]:
+            raise ValueError("Frozen offset scorer audio/CLIP/RGB windows must be aligned")
+        batch, steps, _ = audio.shape
+        rms = _ensure_frozen_scalar(inputs.audio_rms, batch, steps, audio.device, "audio_rms")
+        nonsilent = _ensure_frozen_scalar(
+            inputs.non_silent_ratio,
+            batch,
+            steps,
+            audio.device,
+            "non_silent_ratio",
+        )
+
+        audio_change = _frozen_diff_norm(audio)
+        clip_change = _frozen_diff_norm(clip)
+        rgb_change = _frozen_diff_norm(rgb)
+        energy_change = _frozen_diff_norm(rms.unsqueeze(-1))
+        audio = F.normalize(audio, dim=-1, eps=1e-6)
+        clip = F.normalize(clip, dim=-1, eps=1e-6)
+        rgb = F.normalize(rgb, dim=-1, eps=1e-6)
+        scores = torch.zeros(batch, steps, 3, device=audio.device, dtype=torch.float32)
+        valid = torch.zeros(batch, steps, 3, device=audio.device, dtype=torch.bool)
+
+        for video_index in range(steps):
+            video_context = torch.cat(
+                [
+                    _frozen_context_with_deltas(clip, video_index, self.context_radius),
+                    _frozen_context_with_deltas(rgb, video_index, self.context_radius),
+                ],
+                dim=-1,
+            )
+            for candidate_slot, audio_index in enumerate(
+                (video_index - 1, video_index, video_index + 1)
+            ):
+                if audio_index < 0 or audio_index >= steps:
+                    continue
+                scalar_context = _frozen_scalar_context(
+                    rms,
+                    nonsilent,
+                    audio_change,
+                    energy_change,
+                    clip_change,
+                    rgb_change,
+                    audio_index,
+                    video_index,
+                    self.context_radius,
+                )
+                evidence = _frozen_sync_evidence(
+                    audio_change + energy_change,
+                    clip_change + rgb_change,
+                    audio_index,
+                    video_index,
+                    self.context_radius,
+                )
+                offset = self.candidate_offsets[candidate_slot].to(device=audio.device)
+                scalar = torch.cat(
+                    [
+                        scalar_context,
+                        torch.stack(
+                            [
+                                offset.expand(batch),
+                                offset.abs().expand(batch),
+                                evidence["sync_peak_delta"],
+                                evidence["sync_peak_delta"].abs(),
+                                evidence["center_audio_dominance"],
+                                evidence["center_video_dominance"],
+                                evidence["center_audio_dominance"]
+                                * evidence["center_video_dominance"],
+                            ],
+                            dim=-1,
+                        ),
+                    ],
+                    dim=-1,
+                )
+                scalar = (scalar - self.scalar_mean.to(audio.device)) / self.scalar_std.to(audio.device)
+                values = torch.cat(
+                    [
+                        _frozen_context_with_deltas(audio, audio_index, self.context_radius),
+                        video_context,
+                        scalar,
+                    ],
+                    dim=-1,
+                )
+                scores[:, video_index, candidate_slot] = self.net(values).squeeze(-1)
+                valid[:, video_index, candidate_slot] = True
+
+        selection = scores.masked_fill(~valid, -1e9)
+        tie_break = self.candidate_offsets.abs().to(audio.device).view(1, 1, 3) * 1e-6
+        best_index = (selection - tie_break).argmax(dim=-1)
+        best_score = selection.gather(2, best_index.unsqueeze(-1)).squeeze(-1)
+        offsets = self.candidate_offsets.to(audio.device)
+        best_offset = offsets[best_index]
+        second_score = selection.topk(k=2, dim=-1).values[..., 1]
+        enough_candidates = valid.sum(dim=-1) >= 2
+        margin = torch.where(enough_candidates, best_score - second_score, torch.zeros_like(best_score))
+        accepted = enough_candidates & margin.ge(self.margin_threshold)
+        suggested = torch.where(accepted, best_offset, torch.zeros_like(best_offset))
+        available = torch.ones_like(accepted)
+        return FrozenOffsetScorerOutput(
+            candidate_scores=scores.masked_fill(~valid, 0.0),
+            best_offset=best_offset,
+            margin=margin.clamp_min(0.0),
+            accepted=accepted,
+            suggested_offset=suggested,
+            available=available,
+        )
 
 
 def compute_audio_event_features(
@@ -97,6 +315,8 @@ class LocalAudioEventAligner(nn.Module):
         event_strength_weight: float = 0.05,
         semantic_feature_mode: str = SEMANTIC_DISABLED,
         projector_checkpoint_path: str | None = None,
+        offset_scorer_bundle_path: str | None = None,
+        offset_scorer_margin_threshold: float = 0.15,
     ) -> None:
         super().__init__()
         if hidden_size <= 0:
@@ -121,6 +341,14 @@ class LocalAudioEventAligner(nn.Module):
             self.load_projector_checkpoint(projector_checkpoint_path)
         elif projector_checkpoint_path is not None:
             self.load_projector_checkpoint(projector_checkpoint_path)
+        self.frozen_offset_scorer = (
+            FrozenTemporalOffsetScorer(
+                offset_scorer_bundle_path,
+                margin_threshold=offset_scorer_margin_threshold,
+            )
+            if offset_scorer_bundle_path
+            else None
+        )
 
     def forward(
         self,
@@ -131,6 +359,7 @@ class LocalAudioEventAligner(nn.Module):
         event_features: AudioEventFeatures,
         audio_mask: torch.Tensor | None = None,
         video_mask: torch.Tensor | None = None,
+        frozen_offset_inputs: FrozenOffsetScorerInputs | None = None,
     ) -> LocalAudioAlignmentOutput:
         audio = _ensure_features(audio_features)
         video = _summarize_video(video_features)
@@ -200,6 +429,12 @@ class LocalAudioEventAligner(nn.Module):
         best_offset = torch.where(has_valid_candidate, best_offset, torch.zeros_like(best_offset))
         margin = (best_score - second_score).clamp_min(0.0)
         confidence = (best_score * (0.5 + 0.5 * margin)).clamp(0.0, 1.0)
+        frozen = self._run_frozen_offset_scorer(
+            frozen_offset_inputs,
+            batch=batch,
+            fallback_steps=video_steps,
+            device=audio.device,
+        )
 
         return LocalAudioAlignmentOutput(
             candidate_offsets=offsets.view(1, 1, -1).expand(batch, video_steps, -1),
@@ -213,6 +448,34 @@ class LocalAudioEventAligner(nn.Module):
             second_best_alignment_score=second_score,
             alignment_margin=margin,
             alignment_confidence=confidence,
+            offset_scorer_candidate_scores=frozen.candidate_scores,
+            offset_scorer_best_offset=frozen.best_offset,
+            offset_scorer_margin=frozen.margin,
+            offset_scorer_accepted=frozen.accepted,
+            offset_scorer_suggested_offset=frozen.suggested_offset,
+            offset_scorer_available=frozen.available,
+        )
+
+    def _run_frozen_offset_scorer(
+        self,
+        inputs: FrozenOffsetScorerInputs | None,
+        batch: int,
+        fallback_steps: int,
+        device: torch.device,
+    ) -> FrozenOffsetScorerOutput:
+        if self.frozen_offset_scorer is not None and inputs is not None:
+            scorer = self.frozen_offset_scorer.to(device=device)
+            return scorer(inputs)
+        scores = torch.zeros(batch, fallback_steps, 3, device=device, dtype=torch.float32)
+        offsets = torch.zeros(batch, fallback_steps, device=device, dtype=torch.float32)
+        flags = torch.zeros(batch, fallback_steps, device=device, dtype=torch.bool)
+        return FrozenOffsetScorerOutput(
+            candidate_scores=scores,
+            best_offset=offsets,
+            margin=offsets,
+            accepted=flags,
+            suggested_offset=offsets,
+            available=flags,
         )
 
     def load_projector_checkpoint(self, checkpoint_path: str | Path, map_location: str | torch.device = "cpu") -> None:
@@ -405,3 +668,114 @@ def _adjacent_feature_change(
         change[:, 1:] = torch.maximum(change[:, 1:], pair_change)
         change[:, :-1] = torch.maximum(change[:, :-1], pair_change)
     return change
+
+
+def _ensure_frozen_stream(values: torch.Tensor, expected_dim: int, name: str) -> torch.Tensor:
+    stream = _ensure_features(values)
+    if stream.shape[-1] != expected_dim:
+        raise ValueError(f"Frozen offset scorer {name} dim must be {expected_dim}, got {stream.shape[-1]}")
+    if not torch.isfinite(stream).all():
+        raise ValueError(f"Frozen offset scorer {name} features must be finite")
+    return stream
+
+
+def _ensure_frozen_scalar(
+    values: torch.Tensor,
+    batch: int,
+    steps: int,
+    device: torch.device,
+    name: str,
+) -> torch.Tensor:
+    scalar = values.to(device=device, dtype=torch.float32)
+    if scalar.ndim == 1:
+        scalar = scalar.unsqueeze(0)
+    if scalar.shape != (batch, steps):
+        raise ValueError(f"Frozen offset scorer {name} shape must be {(batch, steps)}, got {tuple(scalar.shape)}")
+    if not torch.isfinite(scalar).all():
+        raise ValueError(f"Frozen offset scorer {name} must be finite")
+    return scalar
+
+
+def _frozen_diff_norm(values: torch.Tensor) -> torch.Tensor:
+    change = torch.zeros(values.shape[:2], device=values.device, dtype=torch.float32)
+    if values.shape[1] <= 1:
+        return change
+    step = (values[:, 1:] - values[:, :-1]).norm(dim=-1)
+    change[:, 1:] = torch.maximum(change[:, 1:], step)
+    change[:, :-1] = torch.maximum(change[:, :-1], step)
+    return change
+
+
+def _frozen_context_indices(index: int, length: int, radius: int) -> list[int]:
+    return [max(0, min(length - 1, index + delta)) for delta in range(-radius, radius + 1)]
+
+
+def _frozen_context_with_deltas(values: torch.Tensor, index: int, radius: int) -> torch.Tensor:
+    indices = _frozen_context_indices(index, values.shape[1], radius)
+    context = values[:, indices]
+    deltas = torch.zeros_like(context)
+    if context.shape[1] > 1:
+        step = context[:, 1:] - context[:, :-1]
+        deltas[:, 1:] = step
+        deltas[:, :-1] = deltas[:, :-1] + step
+    return torch.cat([context.flatten(1), deltas.flatten(1)], dim=-1)
+
+
+def _frozen_scalar_context(
+    rms: torch.Tensor,
+    nonsilent: torch.Tensor,
+    audio_change: torch.Tensor,
+    energy_change: torch.Tensor,
+    clip_change: torch.Tensor,
+    rgb_change: torch.Tensor,
+    audio_index: int,
+    video_index: int,
+    radius: int,
+) -> torch.Tensor:
+    audio_indices = _frozen_context_indices(audio_index, rms.shape[1], radius)
+    video_indices = _frozen_context_indices(video_index, rms.shape[1], radius)
+    return torch.stack(
+        [
+            rms[:, audio_indices],
+            nonsilent[:, audio_indices],
+            audio_change[:, audio_indices],
+            energy_change[:, audio_indices],
+            clip_change[:, video_indices],
+            rgb_change[:, video_indices],
+        ],
+        dim=-1,
+    ).flatten(1)
+
+
+def _frozen_local_peak_lag(values: torch.Tensor, index: int, radius: int) -> torch.Tensor:
+    indices = _frozen_context_indices(index, values.shape[1], radius)
+    peak = values[:, indices].argmax(dim=-1).float()
+    return (peak - float(radius)) * 0.5
+
+
+def _frozen_center_dominance(values: torch.Tensor, index: int) -> torch.Tensor:
+    neighbors = []
+    if index > 0:
+        neighbors.append(values[:, index - 1])
+    if index + 1 < values.shape[1]:
+        neighbors.append(values[:, index + 1])
+    if not neighbors:
+        return torch.zeros(values.shape[0], device=values.device, dtype=torch.float32)
+    return values[:, index] - torch.stack(neighbors, dim=0).mean(dim=0)
+
+
+def _frozen_sync_evidence(
+    audio_signal: torch.Tensor,
+    video_signal: torch.Tensor,
+    audio_index: int,
+    video_index: int,
+    radius: int,
+) -> dict[str, torch.Tensor]:
+    return {
+        "sync_peak_delta": (
+            _frozen_local_peak_lag(audio_signal, audio_index, radius)
+            - _frozen_local_peak_lag(video_signal, video_index, radius)
+        ),
+        "center_audio_dominance": _frozen_center_dominance(audio_signal, audio_index),
+        "center_video_dominance": _frozen_center_dominance(video_signal, video_index),
+    }

@@ -28,7 +28,7 @@ from .speech_encoder.builder import build_speech_encoder
 from .speech_projector.builder import  build_speech_projector
 from .scene_audio_encoder.builder import build_scene_audio_encoder
 from .streaming_av.builder import build_streaming_av_module
-from .streaming_av.audio_event_aligner import compute_audio_event_features
+from .streaming_av.audio_event_aligner import FrozenOffsetScorerInputs, compute_audio_event_features
 from .streaming_av.confidence_gate import AudioSignalFeatures, compute_audio_signal_features
 from .streaming_av.fusion import apply_audio_delta_ratio_cap
 
@@ -37,6 +37,20 @@ from intersuit.constants import SPEECH_TOKEN_INDEX, DEFAULT_SPEECH_TOKEN
 from intersuit.mm_utils import get_anyres_image_grid_shape
 from intersuit.utils import rank0_print, lengths_to_padding_mask
 import random
+
+
+def _select_frozen_offset_scorer_inputs(inputs, index):
+    if inputs is None:
+        return None
+    if isinstance(inputs, (list, tuple)) and not isinstance(inputs, FrozenOffsetScorerInputs):
+        if index >= len(inputs):
+            return None
+        return inputs[index]
+    if not isinstance(inputs, FrozenOffsetScorerInputs):
+        raise ValueError("frozen_offset_scorer_inputs must be FrozenOffsetScorerInputs or a per-sample list")
+    if inputs.audio_features.shape[0] == 1:
+        return inputs if index == 0 else None
+    return FrozenOffsetScorerInputs(*(value[index : index + 1] for value in inputs))
 
 
 class LlavaMetaModel:
@@ -228,6 +242,15 @@ class LlavaMetaModel:
         self.config.audio_event_projector_checkpoint_path = (
             getattr(model_args, "audio_event_projector_checkpoint_path", None) or None
         )
+        self.config.enable_audio_event_offset_scorer = getattr(
+            model_args, "enable_audio_event_offset_scorer", False
+        )
+        self.config.audio_event_offset_scorer_bundle_path = (
+            getattr(model_args, "audio_event_offset_scorer_bundle_path", None) or None
+        )
+        self.config.audio_event_offset_scorer_margin_threshold = getattr(
+            model_args, "audio_event_offset_scorer_margin_threshold", 0.15
+        )
 
         if self.get_scene_audio_encoder() is None:
             scene_audio_encoder = build_scene_audio_encoder(self.config)
@@ -399,6 +422,7 @@ class LlavaMetaForCausalLM(ABC):
         question_features=None,
         scene_audio_signal_features=None,
         scene_audio_windows=None,
+        frozen_offset_scorer_inputs=None,
     ):
         """Fuse scene audio into per-frame video features before flattening.
 
@@ -479,6 +503,10 @@ class LlavaMetaForCausalLM(ABC):
                     video_times,
                     event_features,
                     audio_mask=audio_mask,
+                    frozen_offset_inputs=_select_frozen_offset_scorer_inputs(
+                        frozen_offset_scorer_inputs,
+                        idx,
+                    ),
                 )
             frame_confidence = align_output.offset_confidence.to(dtype=audio.dtype).unsqueeze(1).expand(-1, num_frames, -1)
             frame_confidence = (weights_t * frame_confidence).sum(dim=-1) / denom.squeeze(-1)
@@ -581,6 +609,12 @@ class LlavaMetaForCausalLM(ABC):
                         "second_best_alignment_score": local_alignment.second_best_alignment_score.detach(),
                         "alignment_margin": local_alignment.alignment_margin.detach(),
                         "alignment_confidence": local_alignment.alignment_confidence.detach(),
+                        "offset_scorer_candidate_scores": local_alignment.offset_scorer_candidate_scores.detach(),
+                        "offset_scorer_best_offset": local_alignment.offset_scorer_best_offset.detach(),
+                        "offset_scorer_margin": local_alignment.offset_scorer_margin.detach(),
+                        "offset_scorer_accepted": local_alignment.offset_scorer_accepted.detach(),
+                        "offset_scorer_suggested_offset": local_alignment.offset_scorer_suggested_offset.detach(),
+                        "offset_scorer_available": local_alignment.offset_scorer_available.detach(),
                     }
                 )
             if streaming_av_module.confidence_gate.enable_v1:
@@ -1105,6 +1139,11 @@ class LlavaMetaForCausalLM(ABC):
                 scene_audios
                 if bool(getattr(self.config, "enable_audio_event_aligner_v1", False))
                 else None
+            ),
+            frozen_offset_scorer_inputs=getattr(
+                self,
+                "_audio_event_offset_diagnostic_inputs",
+                None,
             ),
         )
 

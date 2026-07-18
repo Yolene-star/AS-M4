@@ -3,6 +3,9 @@
 from .builder import StreamingAVModule, build_streaming_av_module
 from .audio_event_aligner import (
     AudioEventFeatures,
+    FrozenOffsetScorerInputs,
+    FrozenOffsetScorerOutput,
+    FrozenTemporalOffsetScorer,
     LocalAudioAlignmentOutput,
     LocalAudioEventAligner,
     compute_audio_event_features,
@@ -25,6 +28,9 @@ __all__ = [
     "AudioEventDetector",
     "AudioEventDetectorOutput",
     "AudioEventFeatures",
+    "FrozenOffsetScorerInputs",
+    "FrozenOffsetScorerOutput",
+    "FrozenTemporalOffsetScorer",
     "LocalAudioAlignmentOutput",
     "LocalAudioEventAligner",
     "compute_audio_event_features",

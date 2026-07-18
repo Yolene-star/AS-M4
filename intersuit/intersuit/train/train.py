@@ -133,6 +133,9 @@ class ModelArguments:
     audio_event_align_dim: Optional[int] = field(default=None)
     audio_event_semantic_feature_mode: str = field(default="disabled")
     audio_event_projector_checkpoint_path: Optional[str] = field(default=None)
+    enable_audio_event_offset_scorer: bool = field(default=False)
+    audio_event_offset_scorer_bundle_path: Optional[str] = field(default=None)
+    audio_event_offset_scorer_margin_threshold: float = field(default=0.15)
 
     rope_scaling_factor: Optional[float] = field(default=None)
     rope_scaling_type: Optional[str] = field(default=None)

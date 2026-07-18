@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from intersuit.model.streaming_av.audio_event_aligner import (
+    FrozenOffsetScorerInputs,
     LocalAudioEventAligner,
     compute_audio_event_features,
 )
@@ -199,3 +200,116 @@ def test_missing_projector_checkpoint_has_clear_error(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="trained checkpoint"):
         LocalAudioEventAligner(hidden_size=4, projector_checkpoint_path=str(missing))
+
+
+def _frozen_offset_bundle(tmp_path, margin_threshold=0.15):
+    radius = 1
+    audio_dim, clip_dim, rgb_dim = 2, 3, 2
+    context_count = radius * 2 + 1
+    scalar_dim = context_count * 6 + 7
+    pair_dim = context_count * audio_dim * 2 + context_count * (clip_dim + rgb_dim) * 2 + scalar_dim
+    hidden_dim = 4
+    first_weight = torch.zeros(hidden_dim, pair_dim)
+    scalar_start = context_count * audio_dim * 2 + context_count * (clip_dim + rgb_dim) * 2
+    first_weight[0, scalar_start + scalar_dim - 7] = 1.0
+    path = tmp_path / "offset_runtime_bundle.pt"
+    torch.save(
+        {
+            "format_version": 1,
+            "state_dict": {
+                "net.0.weight": first_weight,
+                "net.0.bias": torch.zeros(hidden_dim),
+                "net.2.weight": torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+                "net.2.bias": torch.zeros(1),
+            },
+            "scalar_mean": torch.zeros(scalar_dim),
+            "scalar_std": torch.ones(scalar_dim),
+            "metadata": {
+                "audio_dim": audio_dim,
+                "clip_dim": clip_dim,
+                "rgb_dim": rgb_dim,
+                "context_radius": radius,
+                "scalar_dim": scalar_dim,
+                "hidden_dim": hidden_dim,
+                "candidate_offsets": [-0.5, 0.0, 0.5],
+                "seed": 20260719,
+                "margin_threshold": margin_threshold,
+                "zero_class_weight": 1.25,
+                "require_center_peak": True,
+            },
+        },
+        path,
+    )
+    return path, margin_threshold
+
+
+def _frozen_inputs():
+    return FrozenOffsetScorerInputs(
+        audio_features=torch.randn(1, 5, 2),
+        clip_features=torch.randn(1, 5, 3),
+        rgb_features=torch.randn(1, 5, 2),
+        audio_rms=torch.linspace(0.1, 0.5, 5).unsqueeze(0),
+        non_silent_ratio=torch.ones(1, 5),
+    )
+
+
+def test_frozen_offset_scorer_emits_scores_acceptance_and_suggestion(tmp_path):
+    bundle, threshold = _frozen_offset_bundle(tmp_path)
+    aligner = LocalAudioEventAligner(
+        hidden_size=4,
+        offset_scorer_bundle_path=str(bundle),
+        offset_scorer_margin_threshold=threshold,
+    )
+    audio = torch.randn(1, 3, 4)
+    video = torch.randn(1, 3, 1, 4)
+    times = _timestamps(3)
+    events = compute_audio_event_features(torch.ones(1, 3, 80) * 0.1, audio_features=audio)
+
+    output = aligner(
+        audio,
+        video,
+        times,
+        times,
+        events,
+        frozen_offset_inputs=_frozen_inputs(),
+    )
+
+    assert output.offset_scorer_candidate_scores.shape == (1, 5, 3)
+    assert output.offset_scorer_available.all()
+    assert output.offset_scorer_best_offset[0, 2].item() == 0.5
+    assert output.offset_scorer_margin[0, 2].item() == pytest.approx(0.5)
+    assert output.offset_scorer_accepted[0, 2].item() is True
+    assert output.offset_scorer_suggested_offset[0, 2].item() == 0.5
+
+
+def test_frozen_offset_scorer_missing_exact_inputs_fails_closed(tmp_path):
+    bundle, threshold = _frozen_offset_bundle(tmp_path)
+    aligner = LocalAudioEventAligner(
+        hidden_size=4,
+        offset_scorer_bundle_path=str(bundle),
+        offset_scorer_margin_threshold=threshold,
+    )
+    audio = torch.randn(1, 3, 4)
+    video = torch.randn(1, 3, 1, 4)
+    times = _timestamps(3)
+    events = compute_audio_event_features(torch.ones(1, 3, 80) * 0.1, audio_features=audio)
+
+    output = aligner(audio, video, times, times, events)
+
+    assert not output.offset_scorer_available.any()
+    assert not output.offset_scorer_accepted.any()
+    assert torch.equal(
+        output.offset_scorer_suggested_offset,
+        torch.zeros_like(output.offset_scorer_suggested_offset),
+    )
+
+
+def test_frozen_offset_scorer_rejects_threshold_change(tmp_path):
+    bundle, _ = _frozen_offset_bundle(tmp_path, margin_threshold=0.15)
+
+    with pytest.raises(ValueError, match="threshold is locked"):
+        LocalAudioEventAligner(
+            hidden_size=4,
+            offset_scorer_bundle_path=str(bundle),
+            offset_scorer_margin_threshold=0.2,
+        )

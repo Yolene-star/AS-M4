@@ -35,6 +35,12 @@ class StreamingAVModule(nn.Module):
             similarity_chunk_size=getattr(config, "av_similarity_chunk_size", None),
         )
         local_offset_sec = float(getattr(config, "audio_event_local_offset_sec", 0.5))
+        enable_offset_scorer = bool(getattr(config, "enable_audio_event_offset_scorer", False))
+        offset_scorer_bundle_path = getattr(config, "audio_event_offset_scorer_bundle_path", None) or None
+        if enable_offset_scorer and offset_scorer_bundle_path is None:
+            raise ValueError(
+                "audio_event_offset_scorer_bundle_path is required when the frozen offset scorer is enabled"
+            )
         self.audio_event_aligner = LocalAudioEventAligner(
             hidden_size=hidden_size,
             align_dim=int(getattr(config, "audio_event_align_dim", align_dim)),
@@ -42,6 +48,10 @@ class StreamingAVModule(nn.Module):
             event_strength_weight=float(getattr(config, "audio_event_strength_weight", 0.05)),
             semantic_feature_mode=str(getattr(config, "audio_event_semantic_feature_mode", "disabled")),
             projector_checkpoint_path=getattr(config, "audio_event_projector_checkpoint_path", None) or None,
+            offset_scorer_bundle_path=offset_scorer_bundle_path if enable_offset_scorer else None,
+            offset_scorer_margin_threshold=float(
+                getattr(config, "audio_event_offset_scorer_margin_threshold", 0.15)
+            ),
         )
         self.confidence_gate = AudioConfidenceGate(
             hidden_size,
