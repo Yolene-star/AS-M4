@@ -20,6 +20,7 @@ import torch
 from intersuit.model.streaming_av.audio_event_aligner import (
     FrozenOffsetScorerInputs,
     FrozenTemporalOffsetScorer,
+    compute_audio_event_features,
 )
 
 
@@ -56,26 +57,45 @@ def load_feature(path: str | Path, key: str) -> tuple[torch.Tensor, torch.Tensor
     return values, timestamps
 
 
-def window_audio_stats(audio_path: str | Path, timestamps: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    from scipy.io import wavfile
+def window_audio_stats(
+    audio_path: str | Path,
+    timestamps: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    rms, nonsilent, _ = window_audio_event_stats(audio_path, timestamps)
+    return rms, nonsilent
 
-    rate, data = wavfile.read(audio_path)
-    if rate != 16000:
-        raise ValueError(f"诊断音频采样率必须为 16000：{audio_path}")
-    values = torch.as_tensor(data).float()
+
+def window_audio_event_stats(
+    audio_path: str | Path,
+    timestamps: torch.Tensor,
+    audio_features: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    from intersuit.streaming.audio_stream import load_scene_audio
+
+    values, rate = load_scene_audio(Path(audio_path), sample_rate=16000, mono=True)
     if values.ndim == 2:
-        values = values.mean(dim=1)
-    if data.dtype.kind in {"i", "u"}:
-        info = torch.iinfo(torch.as_tensor(data).dtype)
-        values = values / float(max(abs(info.min), abs(info.max)))
-    rms, nonsilent = [], []
+        values = values[0]
+    values = values.float()
+    windows = []
     for start, end in timestamps.tolist():
         left = max(0, int(round(start * rate)))
         right = min(values.numel(), int(round(end * rate)))
         window = values[left:right]
-        rms.append(float(torch.sqrt((window * window).mean()).item()) if window.numel() else 0.0)
-        nonsilent.append(float((window.abs() > 1e-4).float().mean().item()) if window.numel() else 0.0)
-    return torch.tensor(rms), torch.tensor(nonsilent)
+        target = max(1, int(round((end - start) * rate)))
+        padded = torch.zeros(target, dtype=torch.float32)
+        copied = min(target, window.numel())
+        if copied:
+            padded[:copied] = window[:copied]
+        windows.append(padded)
+    max_samples = max(item.numel() for item in windows)
+    stacked = torch.zeros(len(windows), max_samples, dtype=torch.float32)
+    for index, window in enumerate(windows):
+        stacked[index, : window.numel()] = window
+    event = compute_audio_event_features(
+        stacked.unsqueeze(0),
+        None if audio_features is None else audio_features.unsqueeze(0),
+    )
+    return event.audio_rms[0], event.non_silent_ratio[0], event.event_strength[0]
 
 
 def jump_rate(values: list[float]) -> float | None:
@@ -123,7 +143,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             audio_ts, rgb_ts, atol=1e-5, rtol=0.0
         ):
             raise ValueError(f"{youtube_id} 三路时间戳不一致")
-        rms, nonsilent = window_audio_stats(rgb_row["audio_path"], audio_ts)
+        rms, nonsilent, event_strength = window_audio_event_stats(
+            rgb_row["audio_path"],
+            audio_ts,
+            audio,
+        )
         output = scorer(
             FrozenOffsetScorerInputs(
                 audio.unsqueeze(0),
@@ -147,6 +171,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "candidate_scores": scores,
                 "best_offset": raw,
                 "margin": margins,
+                "event_strength": [
+                    float(value) for value in event_strength.tolist()
+                ],
                 "accepted": accepted,
                 "suggested_offset": suggested,
                 "raw_jump_rate": jump_rate(raw),
