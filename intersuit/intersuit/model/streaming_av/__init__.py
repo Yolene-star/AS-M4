@@ -10,6 +10,7 @@ from .audio_event_aligner import (
     LocalAudioEventAligner,
     compute_audio_event_features,
 )
+from .offset_stabilizer import OffsetStabilizerOutput, stabilize_offset_scores
 from .confidence_gate import (
     AudioConfidenceGate,
     AudioConfidenceGateOutput,
@@ -31,6 +32,8 @@ __all__ = [
     "FrozenOffsetScorerInputs",
     "FrozenOffsetScorerOutput",
     "FrozenTemporalOffsetScorer",
+    "OffsetStabilizerOutput",
+    "stabilize_offset_scores",
     "LocalAudioAlignmentOutput",
     "LocalAudioEventAligner",
     "compute_audio_event_features",

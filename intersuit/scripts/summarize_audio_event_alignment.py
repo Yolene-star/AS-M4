@@ -34,6 +34,12 @@ DIAGNOSTIC_KEYS = (
     "offset_scorer_accepted",
     "offset_scorer_suggested_offset",
     "offset_scorer_available",
+    "offset_scorer_stable_candidate_scores",
+    "offset_scorer_stable_best_offset",
+    "offset_scorer_stable_margin",
+    "offset_scorer_stable_accepted",
+    "offset_scorer_stable_suggested_offset",
+    "offset_scorer_stable_delay_windows",
 )
 
 CONDITION_LABELS = {
@@ -171,6 +177,8 @@ def summarize_row(row: dict[str, Any]) -> dict[str, Any]:
                 "offset_scorer_accepted_ratio": None,
                 "offset_scorer_margin_mean": None,
                 "offset_scorer_jump_rate": None,
+                "offset_scorer_stable_accepted_ratio": None,
+                "offset_scorer_stable_jump_rate": None,
                 "alignment_score_mean": None,
                 "alignment_margin_mean": None,
                 "alignment_confidence_mean": None,
@@ -201,6 +209,12 @@ def summarize_row(row: dict[str, Any]) -> dict[str, Any]:
             "offset_scorer_margin_mean": numeric_mean(diagnostic.get("offset_scorer_margin")),
             "offset_scorer_jump_rate": offset_jump_rate(
                 diagnostic.get("offset_scorer_suggested_offset")
+            ),
+            "offset_scorer_stable_accepted_ratio": true_ratio(
+                diagnostic.get("offset_scorer_stable_accepted")
+            ),
+            "offset_scorer_stable_jump_rate": offset_jump_rate(
+                diagnostic.get("offset_scorer_stable_suggested_offset")
             ),
             "nan_count": nan_count,
             "inf_count": inf_count,

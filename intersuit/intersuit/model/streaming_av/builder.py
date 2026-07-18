@@ -52,6 +52,21 @@ class StreamingAVModule(nn.Module):
             offset_scorer_margin_threshold=float(
                 getattr(config, "audio_event_offset_scorer_margin_threshold", 0.15)
             ),
+            offset_scorer_stabilization_strategy=str(
+                getattr(config, "audio_event_offset_scorer_stabilization_strategy", "none")
+            ),
+            offset_scorer_consecutive_windows=int(
+                getattr(config, "audio_event_offset_scorer_consecutive_windows", 2)
+            ),
+            offset_scorer_hold_margin=float(
+                getattr(config, "audio_event_offset_scorer_hold_margin", 0.10)
+            ),
+            offset_scorer_switch_margin=float(
+                getattr(config, "audio_event_offset_scorer_switch_margin", 0.30)
+            ),
+            offset_scorer_moving_average_windows=int(
+                getattr(config, "audio_event_offset_scorer_moving_average_windows", 3)
+            ),
         )
         self.confidence_gate = AudioConfidenceGate(
             hidden_size,

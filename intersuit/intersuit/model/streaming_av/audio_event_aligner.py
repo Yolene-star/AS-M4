@@ -9,6 +9,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from .offset_stabilizer import stabilize_offset_scores
+
 
 class AudioEventFeatures(NamedTuple):
     event_strength: torch.Tensor
@@ -38,6 +40,12 @@ class LocalAudioAlignmentOutput(NamedTuple):
     offset_scorer_accepted: torch.Tensor
     offset_scorer_suggested_offset: torch.Tensor
     offset_scorer_available: torch.Tensor
+    offset_scorer_stable_candidate_scores: torch.Tensor
+    offset_scorer_stable_best_offset: torch.Tensor
+    offset_scorer_stable_margin: torch.Tensor
+    offset_scorer_stable_accepted: torch.Tensor
+    offset_scorer_stable_suggested_offset: torch.Tensor
+    offset_scorer_stable_delay_windows: torch.Tensor
 
 
 class FrozenOffsetScorerInputs(NamedTuple):
@@ -317,6 +325,11 @@ class LocalAudioEventAligner(nn.Module):
         projector_checkpoint_path: str | None = None,
         offset_scorer_bundle_path: str | None = None,
         offset_scorer_margin_threshold: float = 0.15,
+        offset_scorer_stabilization_strategy: str = "none",
+        offset_scorer_consecutive_windows: int = 2,
+        offset_scorer_hold_margin: float = 0.10,
+        offset_scorer_switch_margin: float = 0.30,
+        offset_scorer_moving_average_windows: int = 3,
     ) -> None:
         super().__init__()
         if hidden_size <= 0:
@@ -349,6 +362,23 @@ class LocalAudioEventAligner(nn.Module):
             if offset_scorer_bundle_path
             else None
         )
+        self.offset_scorer_stabilization_strategy = str(
+            offset_scorer_stabilization_strategy
+        ).lower()
+        if self.offset_scorer_stabilization_strategy not in {
+            "none",
+            "consecutive",
+            "hysteresis",
+            "moving_average",
+        }:
+            raise ValueError("Unsupported frozen offset scorer stabilization strategy")
+        self.offset_scorer_stabilization_kwargs = {
+            "margin_threshold": float(offset_scorer_margin_threshold),
+            "consecutive_windows": int(offset_scorer_consecutive_windows),
+            "hold_margin": float(offset_scorer_hold_margin),
+            "switch_margin": float(offset_scorer_switch_margin),
+            "moving_average_windows": int(offset_scorer_moving_average_windows),
+        }
 
     def forward(
         self,
@@ -435,6 +465,19 @@ class LocalAudioEventAligner(nn.Module):
             fallback_steps=video_steps,
             device=audio.device,
         )
+        stable = stabilize_offset_scores(
+            frozen.candidate_scores,
+            self.offset_scorer_stabilization_strategy,
+            **self.offset_scorer_stabilization_kwargs,
+        )
+        stable = stable._replace(
+            accepted=stable.accepted & frozen.available,
+            suggested_offset=torch.where(
+                frozen.available,
+                stable.suggested_offset,
+                torch.zeros_like(stable.suggested_offset),
+            ),
+        )
 
         return LocalAudioAlignmentOutput(
             candidate_offsets=offsets.view(1, 1, -1).expand(batch, video_steps, -1),
@@ -454,6 +497,12 @@ class LocalAudioEventAligner(nn.Module):
             offset_scorer_accepted=frozen.accepted,
             offset_scorer_suggested_offset=frozen.suggested_offset,
             offset_scorer_available=frozen.available,
+            offset_scorer_stable_candidate_scores=stable.candidate_scores,
+            offset_scorer_stable_best_offset=stable.best_offset,
+            offset_scorer_stable_margin=stable.margin,
+            offset_scorer_stable_accepted=stable.accepted,
+            offset_scorer_stable_suggested_offset=stable.suggested_offset,
+            offset_scorer_stable_delay_windows=stable.decision_delay_windows,
         )
 
     def _run_frozen_offset_scorer(

@@ -262,6 +262,14 @@ def test_frozen_offset_diagnostic_is_exactly_non_invasive(tmp_path):
     diagnostics = model._last_streaming_av_diagnostics[0]
     assert diagnostics["offset_scorer_available"].all()
     assert diagnostics["offset_scorer_accepted"].any()
+    assert torch.equal(
+        diagnostics["offset_scorer_stable_suggested_offset"],
+        diagnostics["offset_scorer_suggested_offset"],
+    )
+    assert torch.equal(
+        diagnostics["offset_scorer_stable_accepted"],
+        diagnostics["offset_scorer_accepted"],
+    )
 
 
 def test_streaming_av_modules_receive_gradients_from_fused_video_loss():
@@ -379,6 +387,11 @@ def test_e7_gate_zero_stays_exact_with_alignment_diagnostics():
         "offset_scorer_best_offset",
         "offset_scorer_margin",
         "offset_scorer_suggested_offset",
+        "offset_scorer_stable_candidate_scores",
+        "offset_scorer_stable_best_offset",
+        "offset_scorer_stable_margin",
+        "offset_scorer_stable_suggested_offset",
+        "offset_scorer_stable_delay_windows",
     ):
         assert torch.isfinite(diagnostics[key]).all()
     assert not diagnostics["offset_scorer_available"].any()

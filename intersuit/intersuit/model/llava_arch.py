@@ -251,6 +251,21 @@ class LlavaMetaModel:
         self.config.audio_event_offset_scorer_margin_threshold = getattr(
             model_args, "audio_event_offset_scorer_margin_threshold", 0.15
         )
+        self.config.audio_event_offset_scorer_stabilization_strategy = getattr(
+            model_args, "audio_event_offset_scorer_stabilization_strategy", "none"
+        )
+        self.config.audio_event_offset_scorer_consecutive_windows = getattr(
+            model_args, "audio_event_offset_scorer_consecutive_windows", 2
+        )
+        self.config.audio_event_offset_scorer_hold_margin = getattr(
+            model_args, "audio_event_offset_scorer_hold_margin", 0.10
+        )
+        self.config.audio_event_offset_scorer_switch_margin = getattr(
+            model_args, "audio_event_offset_scorer_switch_margin", 0.30
+        )
+        self.config.audio_event_offset_scorer_moving_average_windows = getattr(
+            model_args, "audio_event_offset_scorer_moving_average_windows", 3
+        )
 
         if self.get_scene_audio_encoder() is None:
             scene_audio_encoder = build_scene_audio_encoder(self.config)
@@ -615,6 +630,12 @@ class LlavaMetaForCausalLM(ABC):
                         "offset_scorer_accepted": local_alignment.offset_scorer_accepted.detach(),
                         "offset_scorer_suggested_offset": local_alignment.offset_scorer_suggested_offset.detach(),
                         "offset_scorer_available": local_alignment.offset_scorer_available.detach(),
+                        "offset_scorer_stable_candidate_scores": local_alignment.offset_scorer_stable_candidate_scores.detach(),
+                        "offset_scorer_stable_best_offset": local_alignment.offset_scorer_stable_best_offset.detach(),
+                        "offset_scorer_stable_margin": local_alignment.offset_scorer_stable_margin.detach(),
+                        "offset_scorer_stable_accepted": local_alignment.offset_scorer_stable_accepted.detach(),
+                        "offset_scorer_stable_suggested_offset": local_alignment.offset_scorer_stable_suggested_offset.detach(),
+                        "offset_scorer_stable_delay_windows": local_alignment.offset_scorer_stable_delay_windows.detach(),
                     }
                 )
             if streaming_av_module.confidence_gate.enable_v1:
