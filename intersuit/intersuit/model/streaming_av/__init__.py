@@ -11,6 +11,13 @@ from .audio_event_aligner import (
     compute_audio_event_features,
 )
 from .offset_stabilizer import OffsetStabilizerOutput, stabilize_offset_scores
+from .temporal_offset_gru import (
+    TemporalOffsetGRUDiagnostic,
+    TemporalOffsetGRUOutput,
+    build_temporal_offset_evidence,
+    load_temporal_offset_gru_checkpoint,
+    ordered_offset_emd_loss,
+)
 from .confidence_gate import (
     AudioConfidenceGate,
     AudioConfidenceGateOutput,
@@ -34,6 +41,11 @@ __all__ = [
     "FrozenTemporalOffsetScorer",
     "OffsetStabilizerOutput",
     "stabilize_offset_scores",
+    "TemporalOffsetGRUDiagnostic",
+    "TemporalOffsetGRUOutput",
+    "build_temporal_offset_evidence",
+    "load_temporal_offset_gru_checkpoint",
+    "ordered_offset_emd_loss",
     "LocalAudioAlignmentOutput",
     "LocalAudioEventAligner",
     "compute_audio_event_features",

@@ -141,6 +141,8 @@ class ModelArguments:
     audio_event_offset_scorer_hold_margin: float = field(default=0.10)
     audio_event_offset_scorer_switch_margin: float = field(default=0.30)
     audio_event_offset_scorer_moving_average_windows: int = field(default=3)
+    enable_temporal_offset_gru_diagnostic: bool = field(default=False)
+    temporal_offset_gru_checkpoint_path: Optional[str] = field(default=None)
 
     rope_scaling_factor: Optional[float] = field(default=None)
     rope_scaling_type: Optional[str] = field(default=None)

@@ -67,6 +67,12 @@ class StreamingAVModule(nn.Module):
             offset_scorer_moving_average_windows=int(
                 getattr(config, "audio_event_offset_scorer_moving_average_windows", 3)
             ),
+            enable_temporal_offset_gru_diagnostic=bool(
+                getattr(config, "enable_temporal_offset_gru_diagnostic", False)
+            ),
+            temporal_offset_gru_checkpoint_path=(
+                getattr(config, "temporal_offset_gru_checkpoint_path", None) or None
+            ),
         )
         self.confidence_gate = AudioConfidenceGate(
             hidden_size,

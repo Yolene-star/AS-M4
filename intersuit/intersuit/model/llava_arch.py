@@ -266,6 +266,12 @@ class LlavaMetaModel:
         self.config.audio_event_offset_scorer_moving_average_windows = getattr(
             model_args, "audio_event_offset_scorer_moving_average_windows", 3
         )
+        self.config.enable_temporal_offset_gru_diagnostic = getattr(
+            model_args, "enable_temporal_offset_gru_diagnostic", False
+        )
+        self.config.temporal_offset_gru_checkpoint_path = (
+            getattr(model_args, "temporal_offset_gru_checkpoint_path", None) or None
+        )
 
         if self.get_scene_audio_encoder() is None:
             scene_audio_encoder = build_scene_audio_encoder(self.config)
@@ -636,6 +642,13 @@ class LlavaMetaForCausalLM(ABC):
                         "offset_scorer_stable_accepted": local_alignment.offset_scorer_stable_accepted.detach(),
                         "offset_scorer_stable_suggested_offset": local_alignment.offset_scorer_stable_suggested_offset.detach(),
                         "offset_scorer_stable_delay_windows": local_alignment.offset_scorer_stable_delay_windows.detach(),
+                        "temporal_offset_gru_enabled": local_alignment.temporal_offset_available.any().detach(),
+                        "temporal_offset_logits": local_alignment.temporal_offset_logits.detach(),
+                        "temporal_offset_sync_prob": local_alignment.temporal_offset_sync_prob.detach(),
+                        "temporal_offset_predicted_offset": local_alignment.temporal_offset_predicted_offset.detach(),
+                        "temporal_offset_accepted": local_alignment.temporal_offset_accepted.detach(),
+                        "temporal_offset_suggested_offset": local_alignment.temporal_offset_suggested_offset.detach(),
+                        "temporal_offset_available": local_alignment.temporal_offset_available.detach(),
                     }
                 )
             if streaming_av_module.confidence_gate.enable_v1:

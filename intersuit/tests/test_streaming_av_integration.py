@@ -12,6 +12,7 @@ from intersuit.model.scene_audio_encoder.scene_audio_encoder import SceneAudioEn
 from intersuit.model.streaming_av.builder import build_streaming_av_module
 from intersuit.model.streaming_av.audio_event_aligner import FrozenOffsetScorerInputs
 from intersuit.model.streaming_av.confidence_gate import compute_audio_signal_features
+from intersuit.model.streaming_av.temporal_offset_gru import TemporalOffsetGRUDiagnostic
 
 
 def preserve_torch_rng(test_fn):
@@ -41,6 +42,7 @@ class DummyStreamingModel(LlavaMetaForCausalLM):
         gate_v1: bool = False,
         event_aligner_v1: bool = False,
         offset_scorer_bundle: str | None = None,
+        temporal_offset_checkpoint: str | None = None,
     ):
         self.config = DummyConfig()
         self.config.as_m4_fusion_init = fusion_init
@@ -49,6 +51,10 @@ class DummyStreamingModel(LlavaMetaForCausalLM):
         self.config.enable_audio_event_offset_scorer = offset_scorer_bundle is not None
         self.config.audio_event_offset_scorer_bundle_path = offset_scorer_bundle
         self.config.audio_event_offset_scorer_margin_threshold = 0.15
+        self.config.enable_temporal_offset_gru_diagnostic = (
+            temporal_offset_checkpoint is not None
+        )
+        self.config.temporal_offset_gru_checkpoint_path = temporal_offset_checkpoint
         self.device = torch.device("cpu")
         self.streaming_av_module = build_streaming_av_module(self.config)
 
@@ -63,6 +69,25 @@ def _scene_output():
     features = torch.ones(1, 2, 4) * 0.5
     mask = torch.ones(1, 2, dtype=torch.bool)
     return SceneAudioEncoderOutput(features=features, mask=mask)
+
+
+def _write_temporal_offset_checkpoint(path):
+    model = TemporalOffsetGRUDiagnostic(candidate_feature_dim=4)
+    torch.save(
+        {
+            "format_version": 1,
+            "state_dict": model.state_dict(),
+            "metadata": {
+                "candidate_feature_dim": 4,
+                "evidence_dim": 8,
+                "hidden_size": 128,
+                "candidate_projection_dim": 32,
+                "synchronizability_threshold": 0.5,
+                "frozen_margin_threshold": 0.15,
+            },
+        },
+        path,
+    )
 
 
 def test_enabled_frozen_offset_scorer_requires_bundle_path():
@@ -270,6 +295,56 @@ def test_frozen_offset_diagnostic_is_exactly_non_invasive(tmp_path):
         diagnostics["offset_scorer_stable_accepted"],
         diagnostics["offset_scorer_accepted"],
     )
+
+
+def test_temporal_gru_diagnostic_is_default_off_and_non_invasive(tmp_path):
+    offset_bundle = tmp_path / "offset_bundle.pt"
+    temporal_checkpoint = tmp_path / "temporal_gru.pt"
+    _write_offset_bundle(offset_bundle)
+    _write_temporal_offset_checkpoint(temporal_checkpoint)
+    baseline_model = DummyStreamingModel(
+        fusion_init="identity",
+        event_aligner_v1=True,
+        offset_scorer_bundle=str(offset_bundle),
+    )
+    temporal_model = DummyStreamingModel(
+        fusion_init="identity",
+        event_aligner_v1=True,
+        offset_scorer_bundle=str(offset_bundle),
+        temporal_offset_checkpoint=str(temporal_checkpoint),
+    )
+    temporal_model.streaming_av_module.load_state_dict(
+        baseline_model.streaming_av_module.state_dict(),
+        strict=False,
+    )
+    video = torch.randn(2, 3, 4)
+    scorer_inputs = FrozenOffsetScorerInputs(
+        audio_features=torch.randn(1, 5, 2),
+        clip_features=torch.randn(1, 5, 3),
+        rgb_features=torch.randn(1, 5, 2),
+        audio_rms=torch.linspace(0.1, 0.5, 5).unsqueeze(0),
+        non_silent_ratio=torch.ones(1, 5),
+    )
+    kwargs = {
+        "scene_audio_timestamps": torch.tensor([[[0.0, 1.0], [1.0, 2.0]]]),
+        "frame_timestamps": torch.tensor([[0.5, 1.5]]),
+        "scene_audio_windows": torch.ones(1, 2, 160) * 0.1,
+        "frozen_offset_scorer_inputs": scorer_inputs,
+    }
+
+    baseline = baseline_model.fuse_scene_audio_into_image_features(
+        [video], ["video"], _scene_output(), **kwargs
+    )[0]
+    diagnosed = temporal_model.fuse_scene_audio_into_image_features(
+        [video], ["video"], _scene_output(), **kwargs
+    )[0]
+
+    assert torch.equal(diagnosed, baseline)
+    baseline_diagnostics = baseline_model._last_streaming_av_diagnostics[0]
+    temporal_diagnostics = temporal_model._last_streaming_av_diagnostics[0]
+    assert not baseline_diagnostics["temporal_offset_available"].any()
+    assert temporal_diagnostics["temporal_offset_available"].all()
+    assert temporal_diagnostics["temporal_offset_logits"].shape == (1, 5, 3)
 
 
 def test_streaming_av_modules_receive_gradients_from_fused_video_loss():

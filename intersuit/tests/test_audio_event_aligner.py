@@ -7,6 +7,7 @@ import torch
 
 from intersuit.model.streaming_av.audio_event_aligner import (
     FrozenOffsetScorerInputs,
+    FrozenTemporalOffsetScorer,
     LocalAudioEventAligner,
     compute_audio_event_features,
 )
@@ -280,6 +281,23 @@ def test_frozen_offset_scorer_emits_scores_acceptance_and_suggestion(tmp_path):
     assert output.offset_scorer_margin[0, 2].item() == pytest.approx(0.5)
     assert output.offset_scorer_accepted[0, 2].item() is True
     assert output.offset_scorer_suggested_offset[0, 2].item() == 0.5
+
+
+def test_frozen_offset_scorer_exposes_exact_candidate_hidden_features(tmp_path):
+    bundle, threshold = _frozen_offset_bundle(tmp_path)
+    scorer = FrozenTemporalOffsetScorer(bundle, margin_threshold=threshold)
+
+    output = scorer(_frozen_inputs())
+    reconstructed = scorer.net[2](output.candidate_features).squeeze(-1)
+    valid = torch.ones_like(output.candidate_scores, dtype=torch.bool)
+    valid[:, 0, 0] = False
+    valid[:, -1, 2] = False
+
+    assert output.candidate_features.shape == (1, 5, 3, 4)
+    assert torch.equal(
+        reconstructed.masked_fill(~valid, 0.0),
+        output.candidate_scores,
+    )
 
 
 def test_frozen_offset_scorer_missing_exact_inputs_fails_closed(tmp_path):

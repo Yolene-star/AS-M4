@@ -10,6 +10,11 @@ from torch import nn
 import torch.nn.functional as F
 
 from .offset_stabilizer import stabilize_offset_scores
+from .temporal_offset_gru import (
+    TemporalOffsetGRUOutput,
+    build_temporal_offset_evidence,
+    load_temporal_offset_gru_checkpoint,
+)
 
 
 class AudioEventFeatures(NamedTuple):
@@ -46,6 +51,13 @@ class LocalAudioAlignmentOutput(NamedTuple):
     offset_scorer_stable_accepted: torch.Tensor
     offset_scorer_stable_suggested_offset: torch.Tensor
     offset_scorer_stable_delay_windows: torch.Tensor
+    offset_scorer_candidate_features: torch.Tensor
+    temporal_offset_logits: torch.Tensor
+    temporal_offset_sync_prob: torch.Tensor
+    temporal_offset_predicted_offset: torch.Tensor
+    temporal_offset_accepted: torch.Tensor
+    temporal_offset_suggested_offset: torch.Tensor
+    temporal_offset_available: torch.Tensor
 
 
 class FrozenOffsetScorerInputs(NamedTuple):
@@ -65,6 +77,7 @@ class FrozenOffsetScorerOutput(NamedTuple):
     accepted: torch.Tensor
     suggested_offset: torch.Tensor
     available: torch.Tensor
+    candidate_features: torch.Tensor
 
 
 class FrozenTemporalOffsetScorer(nn.Module):
@@ -173,6 +186,14 @@ class FrozenTemporalOffsetScorer(nn.Module):
         clip = F.normalize(clip, dim=-1, eps=1e-6)
         rgb = F.normalize(rgb, dim=-1, eps=1e-6)
         scores = torch.zeros(batch, steps, 3, device=audio.device, dtype=torch.float32)
+        candidate_features = torch.zeros(
+            batch,
+            steps,
+            3,
+            self.hidden_dim,
+            device=audio.device,
+            dtype=torch.float32,
+        )
         valid = torch.zeros(batch, steps, 3, device=audio.device, dtype=torch.bool)
 
         for video_index in range(steps):
@@ -235,7 +256,9 @@ class FrozenTemporalOffsetScorer(nn.Module):
                     ],
                     dim=-1,
                 )
-                scores[:, video_index, candidate_slot] = self.net(values).squeeze(-1)
+                hidden = self.net[1](self.net[0](values))
+                scores[:, video_index, candidate_slot] = self.net[2](hidden).squeeze(-1)
+                candidate_features[:, video_index, candidate_slot] = hidden
                 valid[:, video_index, candidate_slot] = True
 
         selection = scores.masked_fill(~valid, -1e9)
@@ -257,6 +280,10 @@ class FrozenTemporalOffsetScorer(nn.Module):
             accepted=accepted,
             suggested_offset=suggested,
             available=available,
+            candidate_features=candidate_features.masked_fill(
+                ~valid.unsqueeze(-1),
+                0.0,
+            ),
         )
 
 
@@ -330,6 +357,8 @@ class LocalAudioEventAligner(nn.Module):
         offset_scorer_hold_margin: float = 0.10,
         offset_scorer_switch_margin: float = 0.30,
         offset_scorer_moving_average_windows: int = 3,
+        enable_temporal_offset_gru_diagnostic: bool = False,
+        temporal_offset_gru_checkpoint_path: str | None = None,
     ) -> None:
         super().__init__()
         if hidden_size <= 0:
@@ -379,6 +408,22 @@ class LocalAudioEventAligner(nn.Module):
             "switch_margin": float(offset_scorer_switch_margin),
             "moving_average_windows": int(offset_scorer_moving_average_windows),
         }
+        if enable_temporal_offset_gru_diagnostic:
+            if self.frozen_offset_scorer is None:
+                raise ValueError("Temporal offset GRU requires the frozen offset scorer")
+            if not temporal_offset_gru_checkpoint_path:
+                raise ValueError("Temporal offset GRU checkpoint path is required when enabled")
+            self.temporal_offset_diagnostic = load_temporal_offset_gru_checkpoint(
+                temporal_offset_gru_checkpoint_path,
+                freeze=True,
+            )
+            if (
+                self.temporal_offset_diagnostic.candidate_feature_dim
+                != self.frozen_offset_scorer.hidden_dim
+            ):
+                raise ValueError("Temporal GRU candidate feature dimension does not match frozen scorer")
+        else:
+            self.temporal_offset_diagnostic = None
 
     def forward(
         self,
@@ -478,6 +523,10 @@ class LocalAudioEventAligner(nn.Module):
                 torch.zeros_like(stable.suggested_offset),
             ),
         )
+        temporal = self._run_temporal_offset_diagnostic(
+            frozen,
+            frozen_offset_inputs,
+        )
 
         return LocalAudioAlignmentOutput(
             candidate_offsets=offsets.view(1, 1, -1).expand(batch, video_steps, -1),
@@ -503,7 +552,96 @@ class LocalAudioEventAligner(nn.Module):
             offset_scorer_stable_accepted=stable.accepted,
             offset_scorer_stable_suggested_offset=stable.suggested_offset,
             offset_scorer_stable_delay_windows=stable.decision_delay_windows,
+            offset_scorer_candidate_features=frozen.candidate_features,
+            temporal_offset_logits=temporal.offset_logits,
+            temporal_offset_sync_prob=temporal.synchronizability_prob,
+            temporal_offset_predicted_offset=temporal.predicted_offset,
+            temporal_offset_accepted=temporal.accepted,
+            temporal_offset_suggested_offset=temporal.suggested_offset,
+            temporal_offset_available=(
+                frozen.available
+                & torch.full_like(
+                    frozen.available,
+                    self.temporal_offset_diagnostic is not None,
+                )
+            ),
         )
+
+    def _run_temporal_offset_diagnostic(
+        self,
+        frozen: FrozenOffsetScorerOutput,
+        inputs: FrozenOffsetScorerInputs | None,
+    ) -> TemporalOffsetGRUOutput:
+        if self.temporal_offset_diagnostic is not None and inputs is not None:
+            diagnostic = self.temporal_offset_diagnostic.to(frozen.candidate_scores.device)
+            evidence = build_temporal_offset_evidence(
+                inputs.audio_features.to(frozen.candidate_scores.device),
+                inputs.clip_features.to(frozen.candidate_scores.device),
+                inputs.rgb_features.to(frozen.candidate_scores.device),
+                inputs.audio_rms.to(frozen.candidate_scores.device),
+                inputs.non_silent_ratio.to(frozen.candidate_scores.device),
+            )
+            output = diagnostic(
+                frozen.candidate_scores,
+                frozen.candidate_features,
+                evidence,
+            )
+            return output._replace(
+                accepted=output.accepted & frozen.available,
+                suggested_offset=torch.where(
+                    frozen.available,
+                    output.suggested_offset,
+                    torch.zeros_like(output.suggested_offset),
+                ),
+            )
+        batch, steps, _ = frozen.candidate_scores.shape
+        zeros = torch.zeros(
+            batch,
+            steps,
+            device=frozen.candidate_scores.device,
+            dtype=torch.float32,
+        )
+        flags = torch.zeros_like(zeros, dtype=torch.bool)
+        state = torch.zeros(
+            1,
+            batch,
+            128,
+            device=frozen.candidate_scores.device,
+            dtype=torch.float32,
+        )
+        return TemporalOffsetGRUOutput(
+            offset_logits=zeros.unsqueeze(-1).expand(-1, -1, 3),
+            synchronizability_logits=zeros,
+            synchronizability_prob=zeros,
+            predicted_offset=zeros,
+            accepted=flags,
+            suggested_offset=zeros,
+            state=state,
+        )
+
+    def initial_temporal_offset_state(
+        self,
+        batch_size: int,
+        *,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> torch.Tensor:
+        if self.temporal_offset_diagnostic is None:
+            raise RuntimeError("Temporal offset GRU diagnostic is disabled")
+        return self.temporal_offset_diagnostic.initial_state(
+            batch_size,
+            device=device,
+            dtype=dtype,
+        )
+
+    def reset_temporal_offset_state(
+        self,
+        state: torch.Tensor,
+        reset_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if self.temporal_offset_diagnostic is None:
+            raise RuntimeError("Temporal offset GRU diagnostic is disabled")
+        return self.temporal_offset_diagnostic.reset_state(state, reset_mask)
 
     def _run_frozen_offset_scorer(
         self,
@@ -525,6 +663,18 @@ class LocalAudioEventAligner(nn.Module):
             accepted=flags,
             suggested_offset=offsets,
             available=flags,
+            candidate_features=torch.zeros(
+                batch,
+                fallback_steps,
+                3,
+                (
+                    self.frozen_offset_scorer.hidden_dim
+                    if self.frozen_offset_scorer is not None
+                    else 128
+                ),
+                device=device,
+                dtype=torch.float32,
+            ),
         )
 
     def load_projector_checkpoint(self, checkpoint_path: str | Path, map_location: str | torch.device = "cpu") -> None:
