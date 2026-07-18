@@ -76,6 +76,21 @@ def select_rows_by_label(rows: list[dict[str, Any]], samples_per_label: int | No
     return selected
 
 
+def slice_rows(
+    rows: list[dict[str, Any]],
+    start_index: int | None,
+    end_index: int | None,
+) -> list[dict[str, Any]]:
+    start = 0 if start_index is None else start_index
+    end = len(rows) if end_index is None else end_index
+    if start < 0 or end < start or end > len(rows):
+        raise ValueError(f"分片范围非法：start={start}, end={end}, total={len(rows)}")
+    selected = rows[start:end]
+    if not selected:
+        raise ValueError(f"分片范围为空：start={start}, end={end}, total={len(rows)}")
+    return selected
+
+
 def load_audio_timestamps(path: Path) -> tuple[torch.Tensor, int]:
     payload = torch.load(path, map_location="cpu", weights_only=True)
     timestamps = payload["timestamps"].float()
@@ -294,23 +309,40 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    rows = select_rows_by_label(load_jsonl(Path(args.feature_manifest).resolve(), limit=args.limit), args.samples_per_label)
+    all_rows = select_rows_by_label(
+        load_jsonl(Path(args.feature_manifest).resolve(), limit=args.limit),
+        args.samples_per_label,
+    )
+    rows = (
+        all_rows
+        if args.finalize_existing
+        else slice_rows(all_rows, args.start_index, args.end_index)
+    )
     output_root = Path(args.output_root).resolve()
     device = torch.device(args.device)
     vision_tower = Path(args.vision_tower).resolve()
-    processor = CLIPImageProcessor.from_pretrained(vision_tower, local_files_only=True)
-    model = load_local_clip_vision_model(vision_tower)
-    model = model.cuda() if device.type == "cuda" else model.to(device)
-    model.eval()
-    for param in model.parameters():
-        param.requires_grad = False
+    processor = None
+    model = None
+    if not args.finalize_existing:
+        processor = CLIPImageProcessor.from_pretrained(vision_tower, local_files_only=True)
+        model = load_local_clip_vision_model(vision_tower)
+        model = model.cuda() if device.type == "cuda" else model.to(device)
+        model.eval()
+        for param in model.parameters():
+            param.requires_grad = False
 
     records: list[ClipFeatureRecord] = []
     resumed_count = 0
     for row in rows:
         timestamps, audio_dim = load_audio_timestamps(Path(row["audio_feature_path"]))
-        existing = load_existing_video_feature(row, timestamps, output_root) if args.resume else None
+        existing = (
+            load_existing_video_feature(row, timestamps, output_root)
+            if args.resume or args.finalize_existing
+            else None
+        )
         if existing is None:
+            if args.finalize_existing:
+                raise FileNotFoundError(f"finalize 时缺少 CLIP 特征：{row['youtube_id']}")
             grouped_frames = load_video_frames(Path(row["video_path"]), timestamps, args.frames_per_window, args.decoder)
             embeddings = encode_windows(grouped_frames, processor, model, device, args.select_layer, args.batch_size)
             video_feature_path = save_video_feature(row, timestamps, embeddings, output_root, args)
@@ -339,6 +371,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     summary = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "sample_count": len(records),
+        "source_sample_count": len(all_rows),
+        "start_index": None if args.finalize_existing else args.start_index,
+        "end_index": None if args.finalize_existing else args.end_index,
+        "finalize_existing": bool(args.finalize_existing),
         "resumed_count": resumed_count,
         "newly_extracted_count": len(records) - resumed_count,
         "vision_tower": str(vision_tower),
@@ -376,6 +412,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--decoder", choices=["opencv", "decord"], default="opencv")
     parser.add_argument("--resume", action="store_true", help="复用输出目录中已存在且通过校验的 CLIP 特征")
+    parser.add_argument("--start-index", type=int, default=None, help="可选分片起始索引（含）")
+    parser.add_argument("--end-index", type=int, default=None, help="可选分片结束索引（不含）")
+    parser.add_argument(
+        "--finalize-existing",
+        action="store_true",
+        help="不加载 CLIP 模型，只校验已有特征并生成完整 manifest/summary",
+    )
     return parser
 
 

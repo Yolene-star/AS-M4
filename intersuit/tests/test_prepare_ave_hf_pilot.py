@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+import json
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,3 +59,19 @@ def test_normalizers_accept_ave_hf_schema():
     assert pilot.normalize_label(row) == "8"
     assert pilot.extract_video_source(row) == (b"video", "abc123.mp4")
     assert pilot.extract_audio_source(row) == (b"audio", "abc123.wav")
+
+
+def test_load_exclude_ids_unions_multiple_manifests(tmp_path):
+    first = tmp_path / "first.jsonl"
+    second = tmp_path / "second.jsonl"
+    first.write_text(json.dumps({"youtube_id": "a"}) + "\n", encoding="utf-8")
+    second.write_text(
+        json.dumps({"sample_id": "b"}) + "\n" + json.dumps({"youtube_id": "a"}) + "\n",
+        encoding="utf-8",
+    )
+
+    paths = pilot.resolve_manifest_paths(f"{first},{second}")
+    ids = pilot.load_exclude_ids(paths)
+
+    assert paths == [first.resolve(), second.resolve()]
+    assert ids == {"a", "b"}

@@ -67,3 +67,9 @@ def test_load_existing_audio_feature_validates_sample_id(tmp_path):
     assert result_path == path
     assert torch.equal(result_timestamps, timestamps)
     assert window_count == 2
+
+
+def test_find_existing_audio_feature_returns_none_when_missing(tmp_path):
+    result = features.find_existing_audio_feature({"youtube_id": "missing"}, tmp_path)
+
+    assert result is None

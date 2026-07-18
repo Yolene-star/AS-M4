@@ -225,6 +225,18 @@ def resolve_parquet_files(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def resolve_local_or_hub_parquet(file_name: str, local_files_only: bool) -> str:
+    local_path = Path(file_name).expanduser()
+    if local_path.is_file():
+        return str(local_path)
+    repo_relative_path = REPO_ROOT / file_name
+    if repo_relative_path.is_file():
+        return str(repo_relative_path)
+    from huggingface_hub import hf_hub_download
+
+    return hf_hub_download(DATASET_NAME, file_name, repo_type="dataset", local_files_only=local_files_only)
+
+
 def load_pilot_rows(
     split: str,
     limit: int,
@@ -236,11 +248,10 @@ def load_pilot_rows(
     if split != "train":
         raise ValueError("当前 pilot 默认只支持 train split 的 parquet 分片")
     import pyarrow.parquet as pq
-    from huggingface_hub import hf_hub_download
 
     rows: list[dict[str, Any]] = []
     for file_name in resolve_parquet_files(parquet_file):
-        path = hf_hub_download(DATASET_NAME, file_name, repo_type="dataset", local_files_only=local_files_only)
+        path = resolve_local_or_hub_parquet(file_name, local_files_only)
         table = pq.read_table(path)
         rows.extend(dict(row) for row in table.to_pylist())
     if selection == "first":
@@ -251,18 +262,23 @@ def load_pilot_rows(
     raise ValueError(f"未知 selection：{selection}")
 
 
-def load_exclude_ids(path: Path | None) -> set[str]:
-    if path is None:
-        return set()
+def resolve_manifest_paths(value: str | None) -> list[Path]:
+    if not value:
+        return []
+    return [Path(item.strip()).resolve() for item in value.split(",") if item.strip()]
+
+
+def load_exclude_ids(paths: list[Path]) -> set[str]:
     ids: set[str] = set()
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            value = row.get("youtube_id") or row.get("sample_id")
-            if value is not None:
-                ids.add(str(value))
+    for path in paths:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                value = row.get("youtube_id") or row.get("sample_id")
+                if value is not None:
+                    ids.add(str(value))
     return ids
 
 
@@ -359,8 +375,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         os.environ["HF_ENDPOINT"] = args.hf_endpoint
     if args.disable_xet:
         os.environ["HF_HUB_DISABLE_XET"] = "1"
-    exclude_manifest = Path(args.exclude_manifest).resolve() if args.exclude_manifest else None
-    exclude_ids = load_exclude_ids(exclude_manifest)
+    exclude_manifests = resolve_manifest_paths(args.exclude_manifest)
+    exclude_ids = load_exclude_ids(exclude_manifests)
     rows = load_pilot_rows(args.split, args.limit, args.parquet_file, args.selection, exclude_ids, args.local_files_only)
     records = [validate_row(row, index, args.split, output_root) for index, row in enumerate(rows)]
     valid = [record for record in records if record.valid]
@@ -382,7 +398,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "resolved_parquet_files": resolve_parquet_files(args.parquet_file),
         "selection": args.selection,
         "local_files_only": args.local_files_only,
-        "exclude_manifest": str(exclude_manifest) if exclude_manifest else None,
+        "exclude_manifests": [str(path) for path in exclude_manifests],
         "exclude_id_count": len(exclude_ids),
         "requested_count": args.limit,
         "loaded_count": len(rows),
@@ -414,8 +430,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--threshold", type=int, default=18)
     parser.add_argument("--parquet-file", default=DEFAULT_TRAIN_SHARD)
     parser.add_argument("--selection", choices=("first", "diverse_label"), default="first")
-    parser.add_argument("--exclude-manifest", default=None, help="JSONL manifest，按 youtube_id/sample_id 排除已处理样本")
-    parser.add_argument("--hf-endpoint", default="https://huggingface.co")
+    parser.add_argument(
+        "--exclude-manifest",
+        default=None,
+        help="一个或多个逗号分隔的 JSONL manifest，按 youtube_id/sample_id 排除已处理样本",
+    )
+    parser.add_argument("--hf-endpoint", default=None, help="可选 Hugging Face endpoint；默认不覆盖当前 HF_ENDPOINT 环境变量")
     parser.add_argument("--disable-xet", action="store_true", default=True)
     parser.add_argument("--local-files-only", action="store_true")
     return parser

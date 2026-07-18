@@ -174,19 +174,31 @@ def save_audio_feature(
     return out_path, timestamps, window_count
 
 
-def load_existing_audio_feature(
+def find_existing_audio_feature(
     row: dict[str, Any],
     output_root: Path,
-) -> tuple[Path, torch.Tensor, int]:
+) -> tuple[Path, torch.Tensor, int] | None:
     youtube_id = str(row["youtube_id"])
     path = output_root / "precomputed_audio_features" / youtube_id / "original.pt"
     if not path.is_file():
-        raise FileNotFoundError(f"要求复用音频特征，但文件不存在：{path}")
+        return None
     window_count, _, timestamps = validate_payload(path, "audio_embedding")
     payload = torch.load(path, map_location="cpu", weights_only=True)
     if str(payload.get("sample_id")) != youtube_id:
         raise ValueError(f"已有音频特征 sample_id 不匹配：{path}")
     return path, timestamps, window_count
+
+
+def load_existing_audio_feature(
+    row: dict[str, Any],
+    output_root: Path,
+) -> tuple[Path, torch.Tensor, int]:
+    existing = find_existing_audio_feature(row, output_root)
+    if existing is None:
+        youtube_id = str(row["youtube_id"])
+        path = output_root / "precomputed_audio_features" / youtube_id / "original.pt"
+        raise FileNotFoundError(f"要求复用音频特征，但文件不存在：{path}")
+    return existing
 
 
 def save_video_feature(
@@ -293,6 +305,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
 
     records: list[FeatureRecord] = []
+    resumed_audio_count = 0
     resumed_rgb_count = 0
     video_feature_kind = "skipped_rgb_frame_statistics_audio_manifest_only" if args.skip_rgb_video_features else "frozen_rgb_frame_statistics_expanded"
     video_dims_for_summary = [0] if args.skip_rgb_video_features else None
@@ -300,6 +313,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     for row in rows:
         if args.reuse_existing_audio_features:
             audio_feature_path, timestamps, window_count = load_existing_audio_feature(row, output_root)
+            resumed_audio_count += 1
+        elif args.resume_audio_features:
+            existing_audio = find_existing_audio_feature(row, output_root)
+            if existing_audio is None:
+                audio_feature_path, timestamps, window_count = save_audio_feature(
+                    row, encoder, output_root, args.window_sec, args.hop_sec
+                )
+            else:
+                audio_feature_path, timestamps, window_count = existing_audio
+                resumed_audio_count += 1
         else:
             audio_feature_path, timestamps, window_count = save_audio_feature(
                 row, encoder, output_root, args.window_sec, args.hop_sec
@@ -360,7 +383,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "audio_encoder": encoder.encoder_name if encoder is not None else audio_metadata.get("encoder_name"),
         "checkpoint_name": encoder.checkpoint_name if encoder is not None else audio_metadata.get("checkpoint_name"),
         "checkpoint_sha256": encoder.checkpoint_sha256 if encoder is not None else audio_metadata.get("checkpoint_sha256"),
-        "reused_audio_feature_count": len(records) if args.reuse_existing_audio_features else 0,
+        "reused_audio_feature_count": resumed_audio_count,
+        "new_audio_feature_count": len(records) - resumed_audio_count,
         "resumed_rgb_feature_count": resumed_rgb_count,
         "new_rgb_feature_count": 0 if args.skip_rgb_video_features else len(records) - resumed_rgb_count,
         "audio_embedding_dims": audio_dims,
@@ -400,6 +424,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--reuse-existing-audio-features",
         action="store_true",
         help="复用并校验输出目录中已有的 BEATs 音频特征，不重新加载或运行 BEATs。",
+    )
+    parser.add_argument(
+        "--resume-audio-features",
+        action="store_true",
+        help="复用已存在且通过校验的 BEATs 特征，仅计算缺失样本。",
     )
     parser.add_argument(
         "--resume-rgb-video-features",

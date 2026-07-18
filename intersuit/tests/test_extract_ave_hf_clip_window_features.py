@@ -31,6 +31,14 @@ def test_select_rows_by_label_keeps_label_balanced_prefix():
     assert [row["youtube_id"] for row in selected] == ["a1", "a2", "b1", "b2"]
 
 
+def test_slice_rows_uses_non_overlapping_half_open_range():
+    rows = [{"youtube_id": str(index)} for index in range(6)]
+
+    selected = clip_features.slice_rows(rows, start_index=2, end_index=5)
+
+    assert [row["youtube_id"] for row in selected] == ["2", "3", "4"]
+
+
 def test_frame_indices_for_windows_clamps_to_video_bounds():
     timestamps = torch.tensor([[0.0, 1.0], [9.5, 10.5]])
 
