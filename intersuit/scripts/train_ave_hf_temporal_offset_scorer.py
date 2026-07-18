@@ -547,6 +547,7 @@ def evaluate(
         "margin_mean": float(margins.mean().item()),
         "confidence_mean": float(probs.max(dim=-1).values.mean().item()),
         "condition_accuracy": {key: mean(values) for key, values in sorted(by_condition.items())},
+        "condition_sample_count": {key: len(values) for key, values in sorted(by_condition.items())},
         "label_accuracy": {key: mean(values) for key, values in sorted(by_label.items(), key=lambda item: (int(item[0]) if item[0].isdigit() else 9999, item[0]))},
         "boundary_type_accuracy": {key: mean(values) for key, values in sorted(by_boundary.items())},
         "prediction_distribution": dict(pred_counts),

@@ -18,7 +18,7 @@ from typing import Any
 import cv2
 import torch
 from PIL import Image
-from transformers import CLIPImageProcessor, CLIPVisionModel
+from transformers import CLIPImageProcessor, CLIPVisionConfig, CLIPVisionModel
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -85,6 +85,29 @@ def load_audio_timestamps(path: Path) -> tuple[torch.Tensor, int]:
     if not torch.isfinite(timestamps).all() or not torch.isfinite(audio).all():
         raise ValueError(f"音频特征包含 NaN/Inf：{path}")
     return timestamps, int(audio.shape[-1])
+
+
+def load_local_clip_vision_model(vision_tower: Path) -> CLIPVisionModel:
+    try:
+        return CLIPVisionModel.from_pretrained(vision_tower, local_files_only=True)
+    except ValueError as exc:
+        if "torch.load" not in str(exc) or "safetensors" not in str(exc):
+            raise
+    config = CLIPVisionConfig.from_pretrained(vision_tower, local_files_only=True)
+    model = CLIPVisionModel(config)
+    checkpoint_path = vision_tower / "pytorch_model.bin"
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(f"本地 CLIP 权重缺失：{checkpoint_path}")
+    state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    vision_state = {key: value for key, value in state_dict.items() if key.startswith("vision_model.")}
+    missing, unexpected = model.load_state_dict(vision_state, strict=False)
+    unexpected = [key for key in unexpected if not key.endswith("position_ids")]
+    if unexpected:
+        raise ValueError(f"CLIP 视觉塔权重存在未预期字段：{unexpected[:5]}")
+    critical_missing = [key for key in missing if not key.endswith("position_ids")]
+    if critical_missing:
+        raise ValueError(f"CLIP 视觉塔权重缺失字段：{critical_missing[:5]}")
+    return model
 
 
 def frame_indices_for_windows(timestamps: torch.Tensor, fps: float, frame_count: int, frames_per_window: int) -> list[list[int]]:
@@ -226,6 +249,30 @@ def save_video_feature(
     return out_path
 
 
+def load_existing_video_feature(
+    row: dict[str, Any],
+    timestamps: torch.Tensor,
+    output_root: Path,
+) -> tuple[Path, torch.Tensor] | None:
+    out_path = output_root / "video_window_features" / f"{row['youtube_id']}.pt"
+    if not out_path.is_file():
+        return None
+    payload = torch.load(out_path, map_location="cpu", weights_only=True)
+    embeddings = payload.get("video_features")
+    saved_timestamps = payload.get("timestamps")
+    if not isinstance(embeddings, torch.Tensor) or embeddings.ndim != 2:
+        raise ValueError(f"已有 CLIP 特征形状非法：{out_path}")
+    if not isinstance(saved_timestamps, torch.Tensor) or saved_timestamps.shape != timestamps.shape:
+        raise ValueError(f"已有 CLIP 特征时间戳形状不一致：{out_path}")
+    if not torch.allclose(saved_timestamps.float(), timestamps.float(), atol=1e-5, rtol=0.0):
+        raise ValueError(f"已有 CLIP 特征时间戳内容不一致：{out_path}")
+    if embeddings.shape[0] != timestamps.shape[0]:
+        raise ValueError(f"已有 CLIP 特征窗口数不一致：{out_path}")
+    if not torch.isfinite(embeddings).all():
+        raise ValueError(f"已有 CLIP 特征包含 NaN/Inf：{out_path}")
+    return out_path, embeddings.float()
+
+
 def write_report(path: Path, summary: dict[str, Any]) -> None:
     lines = [
         "# AVE_HF M4 CLIP 视觉塔窗口特征报告",
@@ -252,18 +299,24 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     device = torch.device(args.device)
     vision_tower = Path(args.vision_tower).resolve()
     processor = CLIPImageProcessor.from_pretrained(vision_tower, local_files_only=True)
-    model = CLIPVisionModel.from_pretrained(vision_tower, local_files_only=True)
+    model = load_local_clip_vision_model(vision_tower)
     model = model.cuda() if device.type == "cuda" else model.to(device)
     model.eval()
     for param in model.parameters():
         param.requires_grad = False
 
     records: list[ClipFeatureRecord] = []
+    resumed_count = 0
     for row in rows:
         timestamps, audio_dim = load_audio_timestamps(Path(row["audio_feature_path"]))
-        grouped_frames = load_video_frames(Path(row["video_path"]), timestamps, args.frames_per_window, args.decoder)
-        embeddings = encode_windows(grouped_frames, processor, model, device, args.select_layer, args.batch_size)
-        video_feature_path = save_video_feature(row, timestamps, embeddings, output_root, args)
+        existing = load_existing_video_feature(row, timestamps, output_root) if args.resume else None
+        if existing is None:
+            grouped_frames = load_video_frames(Path(row["video_path"]), timestamps, args.frames_per_window, args.decoder)
+            embeddings = encode_windows(grouped_frames, processor, model, device, args.select_layer, args.batch_size)
+            video_feature_path = save_video_feature(row, timestamps, embeddings, output_root, args)
+        else:
+            video_feature_path, embeddings = existing
+            resumed_count += 1
         records.append(
             ClipFeatureRecord(
                 dataset="AVE_HF",
@@ -286,6 +339,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     summary = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "sample_count": len(records),
+        "resumed_count": resumed_count,
+        "newly_extracted_count": len(records) - resumed_count,
         "vision_tower": str(vision_tower),
         "select_layer": int(args.select_layer),
         "frames_per_window": int(args.frames_per_window),
@@ -320,6 +375,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--frames-per-window", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--decoder", choices=["opencv", "decord"], default="opencv")
+    parser.add_argument("--resume", action="store_true", help="复用输出目录中已存在且通过校验的 CLIP 特征")
     return parser
 
 

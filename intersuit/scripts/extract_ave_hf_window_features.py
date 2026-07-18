@@ -43,7 +43,17 @@ def import_script_module(name: str, path: Path):
 
 
 avut_beats = import_script_module("prepare_avut_beats_features_for_ave_hf", INTERSUIT_ROOT / "scripts/prepare_avut_beats_features.py")
-avut_projector = import_script_module("train_avut_audio_video_projectors_for_ave_hf", INTERSUIT_ROOT / "scripts/train_avut_audio_video_projectors.py")
+avut_projector = None
+
+
+def get_avut_projector_module():
+    global avut_projector
+    if avut_projector is None:
+        avut_projector = import_script_module(
+            "train_avut_audio_video_projectors_for_ave_hf",
+            INTERSUIT_ROOT / "scripts/train_avut_audio_video_projectors.py",
+        )
+    return avut_projector
 
 
 @dataclass(frozen=True)
@@ -164,15 +174,31 @@ def save_audio_feature(
     return out_path, timestamps, window_count
 
 
+def load_existing_audio_feature(
+    row: dict[str, Any],
+    output_root: Path,
+) -> tuple[Path, torch.Tensor, int]:
+    youtube_id = str(row["youtube_id"])
+    path = output_root / "precomputed_audio_features" / youtube_id / "original.pt"
+    if not path.is_file():
+        raise FileNotFoundError(f"要求复用音频特征，但文件不存在：{path}")
+    window_count, _, timestamps = validate_payload(path, "audio_embedding")
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    if str(payload.get("sample_id")) != youtube_id:
+        raise ValueError(f"已有音频特征 sample_id 不匹配：{path}")
+    return path, timestamps, window_count
+
+
 def save_video_feature(
     row: dict[str, Any],
     timestamps: torch.Tensor,
     output_root: Path,
     target_dim: int,
 ) -> Path:
+    projector = get_avut_projector_module()
     youtube_id = str(row["youtube_id"])
     video_path = Path(row["video_path"])
-    features = avut_projector.extract_video_window_features(video_path, timestamps, target_dim=target_dim)
+    features = projector.extract_video_window_features(video_path, timestamps, target_dim=target_dim)
     if features.shape[0] != timestamps.shape[0]:
         raise ValueError(f"{youtube_id} 视频窗口数不一致")
     out_dir = output_root / "video_window_features"
@@ -197,6 +223,22 @@ def save_video_feature(
     )
     validate_payload(out_path, "video_features")
     return out_path
+
+
+def load_existing_video_feature(
+    row: dict[str, Any],
+    timestamps: torch.Tensor,
+    output_root: Path,
+) -> tuple[Path, int] | None:
+    youtube_id = str(row["youtube_id"])
+    path = output_root / "video_window_features" / f"{youtube_id}.pt"
+    if not path.is_file():
+        return None
+    window_count, video_dim, video_ts = validate_payload(path, "video_features")
+    if window_count != timestamps.shape[0]:
+        raise ValueError(f"已有 RGB 特征窗口数不一致：{path}")
+    get_avut_projector_module().validate_timestamp_match(timestamps, video_ts)
+    return path, video_dim
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -242,19 +284,48 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     input_manifest = Path(args.input_manifest).resolve()
     output_root = Path(args.output_root).resolve()
     rows = load_jsonl(input_manifest, limit=args.limit)
-    encoder = avut_beats.BEATsWindowEncoder(
-        checkpoint_path=Path(args.beats_checkpoint).resolve(),
-        beats_code_root=Path(args.beats_code_root).resolve(),
-        device=args.device,
-    )
+    encoder = None
+    if not args.reuse_existing_audio_features:
+        encoder = avut_beats.BEATsWindowEncoder(
+            checkpoint_path=Path(args.beats_checkpoint).resolve(),
+            beats_code_root=Path(args.beats_code_root).resolve(),
+            device=args.device,
+        )
 
     records: list[FeatureRecord] = []
+    resumed_rgb_count = 0
+    video_feature_kind = "skipped_rgb_frame_statistics_audio_manifest_only" if args.skip_rgb_video_features else "frozen_rgb_frame_statistics_expanded"
+    video_dims_for_summary = [0] if args.skip_rgb_video_features else None
+    timestamp_check_passed = True
     for row in rows:
-        audio_feature_path, timestamps, window_count = save_audio_feature(row, encoder, output_root, args.window_sec, args.hop_sec)
-        video_feature_path = save_video_feature(row, timestamps, output_root, args.video_dim)
+        if args.reuse_existing_audio_features:
+            audio_feature_path, timestamps, window_count = load_existing_audio_feature(row, output_root)
+        else:
+            audio_feature_path, timestamps, window_count = save_audio_feature(
+                row, encoder, output_root, args.window_sec, args.hop_sec
+            )
         audio_windows, audio_dim, audio_ts = validate_payload(audio_feature_path, "audio_embedding")
-        video_windows, video_dim, video_ts = validate_payload(video_feature_path, "video_features")
-        avut_projector.validate_timestamp_match(audio_ts, video_ts)
+        if args.skip_rgb_video_features:
+            video_feature_path_text = ""
+            video_dim_for_record = 0
+        else:
+            existing_video = (
+                load_existing_video_feature(row, timestamps, output_root)
+                if args.resume_rgb_video_features
+                else None
+            )
+            if existing_video is None:
+                video_feature_path = save_video_feature(row, timestamps, output_root, args.video_dim)
+                video_windows, video_dim, video_ts = validate_payload(video_feature_path, "video_features")
+            else:
+                video_feature_path, video_dim = existing_video
+                video_windows, _, video_ts = validate_payload(video_feature_path, "video_features")
+                resumed_rgb_count += 1
+            if audio_windows != video_windows:
+                raise ValueError(f"{row['youtube_id']} 音视频窗口数不一致")
+            get_avut_projector_module().validate_timestamp_match(audio_ts, video_ts)
+            video_feature_path_text = str(video_feature_path)
+            video_dim_for_record = video_dim
         records.append(
             FeatureRecord(
                 dataset="AVE_HF",
@@ -264,38 +335,43 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 label=row.get("label"),
                 start_seconds=row.get("start_seconds"),
                 audio_feature_path=str(audio_feature_path),
-                video_feature_path=str(video_feature_path),
+                video_feature_path=video_feature_path_text,
                 audio_path=str(row["audio_path"]),
                 video_path=str(row["video_path"]),
                 window_count=window_count,
                 window_start=float(audio_ts[0, 0].item()),
                 window_end=float(audio_ts[-1, 1].item()),
                 audio_embedding_dim=audio_dim,
-                video_embedding_dim=video_dim,
+                video_embedding_dim=video_dim_for_record,
             )
         )
 
     audio_dims = sorted({record.audio_embedding_dim for record in records})
-    video_dims = sorted({record.video_embedding_dim for record in records})
+    video_dims = video_dims_for_summary or sorted({record.video_embedding_dim for record in records})
     window_counts = Counter(record.window_count for record in records)
     label_counts = Counter(record.label for record in records)
+    first_audio = torch.load(records[0].audio_feature_path, map_location="cpu", weights_only=True)
+    audio_metadata = first_audio.get("metadata", {})
     summary = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "input_manifest": str(input_manifest),
         "output_root": str(output_root),
         "sample_count": len(records),
-        "audio_encoder": encoder.encoder_name,
-        "checkpoint_name": encoder.checkpoint_name,
-        "checkpoint_sha256": encoder.checkpoint_sha256,
+        "audio_encoder": encoder.encoder_name if encoder is not None else audio_metadata.get("encoder_name"),
+        "checkpoint_name": encoder.checkpoint_name if encoder is not None else audio_metadata.get("checkpoint_name"),
+        "checkpoint_sha256": encoder.checkpoint_sha256 if encoder is not None else audio_metadata.get("checkpoint_sha256"),
+        "reused_audio_feature_count": len(records) if args.reuse_existing_audio_features else 0,
+        "resumed_rgb_feature_count": resumed_rgb_count,
+        "new_rgb_feature_count": 0 if args.skip_rgb_video_features else len(records) - resumed_rgb_count,
         "audio_embedding_dims": audio_dims,
-        "video_feature_kind": "frozen_rgb_frame_statistics_expanded",
+        "video_feature_kind": video_feature_kind,
         "video_embedding_dims": video_dims,
         "window_sec": float(args.window_sec),
         "hop_sec": float(args.hop_sec),
         "label_counts": dict(label_counts),
         "window_count_counts": {str(key): value for key, value in sorted(window_counts.items())},
         "finite_check_passed": True,
-        "timestamp_check_passed": True,
+        "timestamp_check_passed": timestamp_check_passed,
         "gate_or_dynamic_window_modified": False,
         "paths": {
             "feature_manifest": str(output_root / "ave_hf_window_feature_manifest.jsonl"),
@@ -320,6 +396,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--window-sec", type=float, default=1.0)
     parser.add_argument("--hop-sec", type=float, default=0.5)
     parser.add_argument("--video-dim", type=int, default=768)
+    parser.add_argument(
+        "--reuse-existing-audio-features",
+        action="store_true",
+        help="复用并校验输出目录中已有的 BEATs 音频特征，不重新加载或运行 BEATs。",
+    )
+    parser.add_argument(
+        "--resume-rgb-video-features",
+        action="store_true",
+        help="复用输出目录中已存在且通过时间戳校验的 RGB 窗口特征。",
+    )
+    parser.add_argument(
+        "--skip-rgb-video-features",
+        action="store_true",
+        help="只提取 BEATs 音频窗口特征并保留 manifest，视频语义特征由独立 CLIP 脚本生成。",
+    )
     return parser
 
 

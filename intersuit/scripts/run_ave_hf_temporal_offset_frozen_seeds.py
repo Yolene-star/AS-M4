@@ -100,6 +100,7 @@ def summarize_seed(name: str, summary: dict[str, Any]) -> dict[str, Any]:
         "margin_mean": final["margin_mean"],
         "confidence_mean": final["confidence_mean"],
         "condition_accuracy": final["condition_accuracy"],
+        "condition_sample_count": final["condition_sample_count"],
         "prediction_distribution": final["prediction_distribution"],
         "zero_false_shift_count": final.get("zero_false_shift_count"),
         "all_scores_finite": final["all_scores_finite"],
@@ -158,6 +159,7 @@ def write_report(path: Path, payload: dict[str, Any]) -> None:
         lines.append(
             f"- {row['name']}：decision={row['decision']}，n={row['sample_count']}，"
             f"acc={row['accuracy']:.4f}，margin={row['margin_mean']:.4f}，"
+            f"condition_n={row['condition_sample_count']}，"
             f"condition={row['condition_accuracy']}，pred={row['prediction_distribution']}"
         )
     path.parent.mkdir(parents=True, exist_ok=True)

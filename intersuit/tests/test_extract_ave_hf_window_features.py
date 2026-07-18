@@ -44,3 +44,26 @@ def test_validate_payload_rejects_timestamp_mismatch(tmp_path):
         assert "时间戳" in str(exc)
     else:
         raise AssertionError("validate_payload should reject timestamp mismatch")
+
+
+def test_load_existing_audio_feature_validates_sample_id(tmp_path):
+    path = tmp_path / "precomputed_audio_features" / "abc" / "original.pt"
+    path.parent.mkdir(parents=True)
+    timestamps = torch.tensor([[0.0, 1.0], [0.5, 1.5]])
+    torch.save(
+        {
+            "sample_id": "abc",
+            "audio_embedding": torch.ones(2, 4),
+            "timestamps": timestamps,
+            "metadata": {"encoder_name": "BEATs"},
+        },
+        path,
+    )
+
+    result_path, result_timestamps, window_count = features.load_existing_audio_feature(
+        {"youtube_id": "abc"}, tmp_path
+    )
+
+    assert result_path == path
+    assert torch.equal(result_timestamps, timestamps)
+    assert window_count == 2

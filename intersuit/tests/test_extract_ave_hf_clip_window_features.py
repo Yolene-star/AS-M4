@@ -38,3 +38,45 @@ def test_frame_indices_for_windows_clamps_to_video_bounds():
 
     assert indices[0] == [2, 8]
     assert indices[1] == [98, 99]
+
+
+def test_load_existing_video_feature_validates_and_reuses_output(tmp_path):
+    timestamps = torch.tensor([[0.0, 1.0], [0.5, 1.5]])
+    feature_dir = tmp_path / "video_window_features"
+    feature_dir.mkdir()
+    feature_path = feature_dir / "abc.pt"
+    torch.save(
+        {
+            "video_features": torch.ones(2, 4),
+            "timestamps": timestamps,
+            "metadata": {"feature_kind": "test"},
+        },
+        feature_path,
+    )
+
+    result = clip_features.load_existing_video_feature({"youtube_id": "abc"}, timestamps, tmp_path)
+
+    assert result is not None
+    path, embeddings = result
+    assert path == feature_path
+    assert embeddings.shape == (2, 4)
+
+
+def test_load_existing_video_feature_rejects_mismatched_timestamps(tmp_path):
+    timestamps = torch.tensor([[0.0, 1.0]])
+    feature_dir = tmp_path / "video_window_features"
+    feature_dir.mkdir()
+    torch.save(
+        {
+            "video_features": torch.ones(1, 4),
+            "timestamps": torch.tensor([[1.0, 2.0]]),
+        },
+        feature_dir / "abc.pt",
+    )
+
+    try:
+        clip_features.load_existing_video_feature({"youtube_id": "abc"}, timestamps, tmp_path)
+    except ValueError as exc:
+        assert "时间戳内容不一致" in str(exc)
+    else:
+        raise AssertionError("时间戳不一致时应拒绝复用已有特征")

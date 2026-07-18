@@ -88,6 +88,7 @@ def test_evaluate_reports_accuracy_and_margin():
 
     assert result["accuracy"] == 1.0
     assert result["margin_mean"] > 0
+    assert result["condition_sample_count"] == {"original": 1, "shift_plus_0.5": 1}
 
 
 def test_context_features_include_multiple_windows_and_deltas():
