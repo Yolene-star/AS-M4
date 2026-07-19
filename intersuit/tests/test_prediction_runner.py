@@ -306,6 +306,33 @@ def test_mismatched_condition_replaces_path_backed_audio():
     assert mismatched["scene_audio_hop_sec"] == 1.0
 
 
+def test_mismatched_condition_skips_rows_without_audio():
+    qa0 = {
+        "id": "first_turn0",
+        "sample_id": "first",
+        "scene_audio_path": "first.mp4",
+    }
+    no_audio = {
+        "id": "silent_turn0",
+        "sample_id": "silent",
+        "scene_audio_path": None,
+    }
+    qa2 = {
+        "id": "third_turn0",
+        "sample_id": "third",
+        "scene_audio_path": "third.mp4",
+    }
+
+    mismatched = runner.apply_audio_condition(
+        qa0,
+        {"audio_condition": "mismatched"},
+        [qa0, no_audio, qa2],
+        0,
+    )
+
+    assert mismatched["scene_audio_path"] == "third.mp4"
+
+
 def test_generated_token_slice_not_empty_when_tokens_exist():
     input_ids = torch.tensor([[10, 11, 12]])
     generated_only = torch.tensor([[21, 22]])

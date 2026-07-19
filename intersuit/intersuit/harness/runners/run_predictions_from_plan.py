@@ -266,19 +266,39 @@ def apply_audio_condition(
         return result
 
     if condition == "mismatched":
-        if audio_pool:
-            source = audio_pool[(sample_index + 1) % len(audio_pool)]
-            result["scene_audio"] = source.get("scene_audio")
-            result["scene_audio_timestamps"] = source.get("scene_audio_timestamps")
-            if source.get("scene_audio_path"):
-                result["scene_audio_path"] = source["scene_audio_path"]
-                for key in (
-                    "scene_audio_sample_rate",
-                    "scene_audio_window_sec",
-                    "scene_audio_hop_sec",
-                ):
-                    if source.get(key) is not None:
-                        result[key] = source[key]
+        source = None
+        current_id = result.get("sample_id") or result.get("id")
+        current_path = result.get("scene_audio_path")
+        for offset in range(1, len(audio_pool) + 1):
+            candidate = audio_pool[(sample_index + offset) % len(audio_pool)]
+            candidate_id = candidate.get("sample_id") or candidate.get("id")
+            candidate_path = candidate.get("scene_audio_path")
+            has_audio = candidate.get("scene_audio") is not None or bool(candidate_path)
+            same_source = (
+                current_id is not None
+                and candidate_id is not None
+                and candidate_id == current_id
+            ) or (
+                current_path is not None and candidate_path == current_path
+            )
+            if has_audio and not same_source:
+                source = candidate
+                break
+        if source is None:
+            raise ValueError(f"没有可用于 {result.get('id')} 的不同来源错配音频")
+        result["scene_audio"] = source.get("scene_audio")
+        result["scene_audio_timestamps"] = source.get("scene_audio_timestamps")
+        if source.get("scene_audio_path"):
+            result["scene_audio_path"] = source["scene_audio_path"]
+            for key in (
+                "scene_audio_sample_rate",
+                "scene_audio_window_sec",
+                "scene_audio_hop_sec",
+            ):
+                if source.get(key) is not None:
+                    result[key] = source[key]
+        else:
+            result["scene_audio_path"] = None
         return result
 
     if audio is None:
