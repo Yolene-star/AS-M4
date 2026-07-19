@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .scene_audio_encoder import (
     DummySceneAudioEncoder,
+    FrozenBEATsSceneAudioEncoder,
     FrozenTorchaudioSceneAudioEncoder,
     PrecomputedSceneAudioEncoder,
 )
@@ -17,6 +18,7 @@ def build_scene_audio_encoder(config):
     - ``dummy``: deterministic waveform statistics, useful for harnesses.
     - ``precomputed``: accepts already extracted features.
     - ``frozen_torchaudio``: frozen torchaudio SSL bundle such as WAV2VEC2_BASE.
+    - ``beats``: frozen local BEATs plus a trainable audio projector.
     """
 
     encoder_type = getattr(config, "scene_audio_encoder_type", "dummy")
@@ -41,5 +43,23 @@ def build_scene_audio_encoder(config):
             sample_rate=int(getattr(config, "scene_audio_sample_rate", 16000)),
             weight_path=getattr(config, "scene_audio_torchaudio_weight_path", None) or None,
         )
+    if encoder_type == "beats":
+        encoder = FrozenBEATsSceneAudioEncoder(
+            hidden_size=hidden_size,
+            checkpoint_path=getattr(
+                config,
+                "scene_audio_beats_checkpoint",
+                "intersuit/checkpoints/BEATs_iter3_plus_AS2M.pt",
+            ),
+            code_root=getattr(
+                config,
+                "scene_audio_beats_code_root",
+                "third_party/OmniMMI/baselines/videollama2/model",
+            ),
+            sample_rate=int(getattr(config, "scene_audio_sample_rate", 16000)),
+            expected_sha256=getattr(config, "scene_audio_beats_checkpoint_sha256", None),
+        )
+        config.scene_audio_beats_checkpoint_sha256 = encoder.checkpoint_sha256
+        return encoder
 
     raise ValueError(f"Unknown scene audio encoder: {encoder_type}")

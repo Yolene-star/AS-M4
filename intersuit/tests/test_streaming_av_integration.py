@@ -370,6 +370,52 @@ def test_streaming_av_modules_receive_gradients_from_fused_video_loss():
     assert any("confidence_gate" in name for name in grad_names)
 
 
+class _ForbiddenModule(torch.nn.Module):
+    def forward(self, *args, **kwargs):
+        raise AssertionError("simple BEATs fusion must bypass this module")
+
+
+def test_beats_simple_residual_bypasses_alignment_and_learned_gate():
+    model = DummyStreamingModel(fusion_init="identity")
+    model.config.as_m4_fusion_mode = "beats_simple_residual"
+    model.config.as_m4_simple_audio_gate = 1.0
+    model.streaming_av_module.event_detector = _ForbiddenModule()
+    model.streaming_av_module.temporal_aligner = _ForbiddenModule()
+    model.streaming_av_module.confidence_gate = _ForbiddenModule()
+    video = torch.zeros(3, 2, 4)
+
+    fused = model.fuse_scene_audio_into_image_features(
+        [video],
+        ["video"],
+        _scene_output(),
+    )[0]
+
+    diagnostics = model._last_streaming_av_diagnostics[0]
+    assert fused.shape == video.shape
+    assert torch.any(fused != video)
+    assert diagnostics["fusion_mode"] == "beats_simple_residual"
+    assert diagnostics["dynamic_alignment_enabled"] is False
+    assert diagnostics["learned_gate_enabled"] is False
+
+
+def test_beats_simple_residual_gate_zero_is_exact_rollback():
+    model = DummyStreamingModel(fusion_init="identity")
+    model.config.as_m4_fusion_mode = "beats_simple_residual"
+    video = torch.randn(3, 2, 4)
+
+    fused = model.fuse_scene_audio_into_image_features(
+        [video],
+        ["video"],
+        _scene_output(),
+        force_audio_gate=0.0,
+    )[0]
+
+    assert torch.equal(fused, video)
+    diagnostics = model._last_streaming_av_diagnostics[0]
+    assert diagnostics["gate_mean"].item() == 0.0
+    assert diagnostics["delta_to_video_ratio"].item() == 0.0
+
+
 @preserve_torch_rng
 def test_gate_v1_integration_emits_signal_question_and_offset_diagnostics():
     model = DummyStreamingModel(fusion_init="identity", gate_v1=True)

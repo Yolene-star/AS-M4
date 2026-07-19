@@ -19,6 +19,7 @@ SPEC.loader.exec_module(scene_audio_encoder)
 
 DummySceneAudioEncoder = scene_audio_encoder.DummySceneAudioEncoder
 FrozenTorchaudioSceneAudioEncoder = scene_audio_encoder.FrozenTorchaudioSceneAudioEncoder
+FrozenBEATsSceneAudioEncoder = scene_audio_encoder.FrozenBEATsSceneAudioEncoder
 PrecomputedSceneAudioEncoder = scene_audio_encoder.PrecomputedSceneAudioEncoder
 
 
@@ -117,6 +118,15 @@ def test_frozen_torchaudio_encoder_exposes_speech_acoustic_baseline_label():
     assert "speech acoustic baseline" in (FrozenTorchaudioSceneAudioEncoder.__doc__ or "")
 
 
+def test_frozen_beats_encoder_requires_local_checkpoint_and_source(tmp_path):
+    with pytest.raises(FileNotFoundError, match="Automatic downloads are disabled"):
+        FrozenBEATsSceneAudioEncoder(
+            hidden_size=4,
+            checkpoint_path=str(tmp_path / "missing.pt"),
+            code_root=str(tmp_path / "missing_source"),
+        )
+
+
 if __name__ == "__main__":
     test_dummy_encoder_outputs_shape_and_mask()
     test_dummy_encoder_handles_silence_without_nan()
@@ -126,4 +136,5 @@ if __name__ == "__main__":
     test_precomputed_projection_is_frozen()
     test_precomputed_encoder_rejects_bad_timestamps_and_nonfinite_features()
     test_frozen_torchaudio_encoder_rejects_unknown_bundle()
+    test_frozen_beats_encoder_requires_local_checkpoint_and_source(Path("/tmp"))
     print("scene_audio_encoder harness passed")

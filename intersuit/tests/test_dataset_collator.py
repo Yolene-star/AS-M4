@@ -14,6 +14,7 @@ trainer_stub = types.ModuleType("intersuit.train.llava_trainer")
 trainer_stub.__spec__ = importlib.machinery.ModuleSpec("intersuit.train.llava_trainer", loader=None)
 trainer_stub.LLaVATrainer = object
 sys.modules.setdefault("intersuit.train.llava_trainer", trainer_stub)
+import intersuit.train.train as train_module
 from intersuit.train.train import DataCollatorForSupervisedDataset
 
 
@@ -76,6 +77,39 @@ def test_precomputed_video_features_collate_as_video_feature_modality():
 
     assert batch["images"].shape == (2, 2, 3, 4)
     assert batch["modalities"] == ["video_feature", "video_feature"]
+
+
+def test_scene_audio_path_uses_media_windows_and_timestamps(monkeypatch):
+    expected_audio = torch.ones(2, 8)
+    expected_timestamps = torch.tensor([[0.0, 1.0], [0.5, 1.5]])
+
+    def fake_load(path, folder, sample_rate, window_sec, hop_sec):
+        assert path == "sample.mp4"
+        assert folder == "audio"
+        assert sample_rate == 16000
+        assert window_sec == 1.0
+        assert hop_sec == 0.5
+        return expected_audio, expected_timestamps
+
+    monkeypatch.setattr(train_module, "_load_scene_audio_media", fake_load)
+    dataset = object.__new__(train_module.LazySupervisedDataset)
+    dataset.data_args = types.SimpleNamespace(
+        scene_audio_folder="audio",
+        scene_audio_feature_folder=None,
+        scene_audio_sample_rate=16000,
+    )
+
+    result = dataset._load_scene_audio_fields(
+        {
+            "scene_audio_path": "sample.mp4",
+            "scene_audio_sample_rate": 16000,
+            "scene_audio_window_sec": 1.0,
+            "scene_audio_hop_sec": 0.5,
+        }
+    )
+
+    assert torch.equal(result["scene_audio"], expected_audio)
+    assert torch.equal(result["scene_audio_timestamps"], expected_timestamps)
 
 
 if __name__ == "__main__":

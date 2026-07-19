@@ -118,8 +118,22 @@ fi
 if [ -n "${AS_M4_AUDIO_DELTA_RATIO_CAP:-}" ]; then
     EXTRA_TRAIN_ARGS+=(--audio_delta_ratio_cap "${AS_M4_AUDIO_DELTA_RATIO_CAP}")
 fi
+if [ -n "${VIDEO_FOLDER:-}" ]; then
+    EXTRA_TRAIN_ARGS+=(--video_folder "${VIDEO_FOLDER}")
+fi
+if [ -n "${FRAMES_UPBOUND:-}" ]; then
+    EXTRA_TRAIN_ARGS+=(--frames_upbound "${FRAMES_UPBOUND}")
+fi
+if [ -n "${VIDEO_FPS:-}" ]; then
+    EXTRA_TRAIN_ARGS+=(--video_fps "${VIDEO_FPS}")
+fi
+if [ -n "${SCENE_AUDIO_FOLDER:-}" ]; then
+    EXTRA_TRAIN_ARGS+=(--scene_audio_folder "${SCENE_AUDIO_FOLDER}")
+fi
 EXTRA_TRAIN_ARGS+=(--as_m4_fusion_init "${AS_M4_FUSION_INIT:-zero}")
 EXTRA_TRAIN_ARGS+=(--as_m4_gate_logit_bias "${AS_M4_GATE_LOGIT_BIAS:--5.0}")
+EXTRA_TRAIN_ARGS+=(--as_m4_fusion_mode "${AS_M4_FUSION_MODE:-aligned_gated}")
+EXTRA_TRAIN_ARGS+=(--as_m4_simple_audio_gate "${AS_M4_SIMPLE_AUDIO_GATE:-1.0}")
 
 DEEPSPEED_ARGS=()
 if [ -n "${DEEPSPEED_CONFIG:-}" ] && [ "${DEEPSPEED_CONFIG}" != "none" ] && [ "${DEEPSPEED_CONFIG}" != "NONE" ]; then
@@ -152,6 +166,9 @@ ACCELERATE_CPU_AFFINITY=1 "$TORCHRUN" --nproc_per_node="${NUM_GPUS}" --master_po
     --scene_audio_encoder_type "${AS_M4_SCENE_AUDIO_ENCODER_TYPE:-dummy}" \
     --scene_audio_torchaudio_bundle "${AS_M4_SCENE_AUDIO_TORCHAUDIO_BUNDLE:-WAV2VEC2_BASE}" \
     --scene_audio_sample_rate "${AS_M4_SCENE_AUDIO_SAMPLE_RATE:-16000}" \
+    --scene_audio_beats_checkpoint "${AS_M4_SCENE_AUDIO_BEATS_CHECKPOINT:-intersuit/checkpoints/BEATs_iter3_plus_AS2M.pt}" \
+    --scene_audio_beats_code_root "${AS_M4_SCENE_AUDIO_BEATS_CODE_ROOT:-third_party/OmniMMI/baselines/videollama2/model}" \
+    --scene_audio_beats_checkpoint_sha256 "${AS_M4_SCENE_AUDIO_BEATS_CHECKPOINT_SHA256:-}" \
     --num_audio_events "${AS_M4_NUM_AUDIO_EVENTS:-25}" \
     --audio_quality_dim "${AS_M4_AUDIO_QUALITY_DIM:-1}" \
     --max_av_offset_sec "${AS_M4_MAX_AV_OFFSET_SEC:-1.5}" \

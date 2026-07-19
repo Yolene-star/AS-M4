@@ -6,6 +6,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -331,6 +332,48 @@ def test_mismatched_condition_skips_rows_without_audio():
     )
 
     assert mismatched["scene_audio_path"] == "third.mp4"
+
+
+def test_scene_audio_backend_is_installed_once_per_signature(monkeypatch):
+    import intersuit.model.scene_audio_encoder.builder as encoder_builder
+    import intersuit.model.streaming_av.builder as streaming_builder
+
+    calls = {"encoder": 0, "streaming": 0}
+
+    def build_encoder(config):
+        calls["encoder"] += 1
+        return torch.nn.Linear(2, 2)
+
+    def build_streaming(config):
+        calls["streaming"] += 1
+        return torch.nn.Linear(2, 2)
+
+    monkeypatch.setattr(encoder_builder, "build_scene_audio_encoder", build_encoder)
+    monkeypatch.setattr(streaming_builder, "build_streaming_av_module", build_streaming)
+
+    class FakeModel:
+        def __init__(self):
+            self.config = SimpleNamespace(hidden_size=4)
+            self.body = SimpleNamespace(streaming_av_module=None)
+            self.weight = torch.nn.Parameter(torch.ones(1))
+
+        def get_model(self):
+            return self.body
+
+        def parameters(self):
+            return iter([self.weight])
+
+    model = FakeModel()
+    env = {
+        "AS_M4_SCENE_AUDIO_ENCODER_TYPE": "beats",
+        "AS_M4_SCENE_AUDIO_BEATS_CHECKPOINT": "beats.pt",
+        "AS_M4_SCENE_AUDIO_BEATS_CODE_ROOT": "beats_source",
+    }
+
+    assert runner.maybe_replace_scene_audio_encoder(model, env) is True
+    assert runner.maybe_replace_scene_audio_encoder(model, env) is False
+    assert calls == {"encoder": 1, "streaming": 1}
+    assert model.config.scene_audio_hidden_size == 4
 
 
 def test_generated_token_slice_not_empty_when_tokens_exist():

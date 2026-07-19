@@ -113,6 +113,13 @@ class ModelArguments:
     scene_audio_torchaudio_bundle: str = field(default="WAV2VEC2_BASE")
     scene_audio_torchaudio_weight_path: Optional[str] = field(default=None)
     scene_audio_sample_rate: int = field(default=16000)
+    scene_audio_beats_checkpoint: str = field(
+        default="intersuit/checkpoints/BEATs_iter3_plus_AS2M.pt"
+    )
+    scene_audio_beats_code_root: str = field(
+        default="third_party/OmniMMI/baselines/videollama2/model"
+    )
+    scene_audio_beats_checkpoint_sha256: Optional[str] = field(default=None)
     num_audio_events: Optional[int] = field(default=25)
     audio_quality_dim: Optional[int] = field(default=1)
     streaming_av_align_dim: Optional[int] = field(default=None)
@@ -122,6 +129,8 @@ class ModelArguments:
     audio_delta_ratio_cap: float = field(default=0.0)
     as_m4_fusion_init: str = field(default="zero")
     as_m4_gate_logit_bias: float = field(default=-5.0)
+    as_m4_fusion_mode: str = field(default="aligned_gated")
+    as_m4_simple_audio_gate: float = field(default=1.0)
     enable_audio_confidence_gate_v1: bool = field(default=False)
     audio_gate_silence_threshold: float = field(default=1e-4)
     audio_gate_rms_reference: float = field(default=0.05)
@@ -1241,7 +1250,7 @@ class LazySupervisedDataset(Dataset):
         for sample in self.list_data_dict:
             cur_len = sum(len(conv["value"].split()) for conv in sample["conversations"])
             if not self.data_args.is_mop:
-                cur_len = cur_len if ("image" in sample) or ("video" in sample) or ("speech" in sample) else -cur_len
+                cur_len = cur_len if ("image" in sample) or ("video" in sample) or ("video_path" in sample) or ("speech" in sample) else -cur_len
                 length_list.append(cur_len)
             else:
                 if ("image" in sample) or ("video" in sample):
@@ -1368,10 +1377,10 @@ class LazySupervisedDataset(Dataset):
             sources = preprocess_multimodal_av(copy.deepcopy([e["conversations"] for e in sources]), self.data_args)
             
 
-        elif "video" in sources[0]:
-            video_file = self.list_data_dict[i]["video"]
+        elif "video" in sources[0] or "video_path" in sources[0]:
+            video_file = self.list_data_dict[i].get("video") or self.list_data_dict[i]["video_path"]
             video_folder = self.data_args.video_folder
-            video_file = os.path.join(video_folder, video_file)
+            video_file = os.path.join(video_folder or "", video_file)
             suffix = video_file.split(".")[-1]
             if not os.path.exists(video_file):
                 print("File {} not exist!".format(video_file))
@@ -1430,7 +1439,7 @@ class LazySupervisedDataset(Dataset):
             else:
                 sources = copy.deepcopy([e["conversations"] for e in sources])
 
-        has_image = ("image" in self.list_data_dict[i]) or ("video" in self.list_data_dict[i] or ("video_features" in self.list_data_dict[i]) or ("speech" in self.list_data_dict[i]))
+        has_image = ("image" in self.list_data_dict[i]) or ("video" in self.list_data_dict[i] or ("video_path" in self.list_data_dict[i]) or ("video_features" in self.list_data_dict[i]) or ("speech" in self.list_data_dict[i]))
         data_dict = preprocess(sources, self.tokenizer, has_image=has_image)
 
         if "prompt" in data_dict:
@@ -1444,7 +1453,7 @@ class LazySupervisedDataset(Dataset):
         # image exist in the data
         if "image" in self.list_data_dict[i]:
             data_dict["image"] = image
-        elif "video" in self.list_data_dict[i]:
+        elif "video" in self.list_data_dict[i] or "video_path" in self.list_data_dict[i]:
             data_dict["image"] = image
         elif "video_features" in self.list_data_dict[i]:
             data_dict["image"] = image
@@ -1457,7 +1466,11 @@ class LazySupervisedDataset(Dataset):
         # speech exist in the data
         if "speech" in self.list_data_dict[i]:
             data_dict["speech"] = speech
-        if "scene_audio" in self.list_data_dict[i] or "scene_audio_features" in self.list_data_dict[i]:
+        if (
+            "scene_audio" in self.list_data_dict[i]
+            or "scene_audio_features" in self.list_data_dict[i]
+            or self.list_data_dict[i].get("scene_audio_path")
+        ):
             data_dict.update(self._load_scene_audio_fields(self.list_data_dict[i]))
         # prompt exist in the data
         if prompt is not None:
@@ -1477,12 +1490,24 @@ class LazySupervisedDataset(Dataset):
 
         if "scene_audio_features" in sample:
             scene_audio = _scene_audio_to_tensor(sample["scene_audio_features"], self.data_args.scene_audio_feature_folder)
-        else:
+            generated_timestamps = None
+        elif "scene_audio" in sample:
             scene_audio = _scene_audio_to_tensor(sample["scene_audio"], self.data_args.scene_audio_folder)
+            generated_timestamps = None
+        else:
+            scene_audio, generated_timestamps = _load_scene_audio_media(
+                sample["scene_audio_path"],
+                folder=self.data_args.scene_audio_folder,
+                sample_rate=int(sample.get("scene_audio_sample_rate") or self.data_args.scene_audio_sample_rate),
+                window_sec=float(sample.get("scene_audio_window_sec") or 1.0),
+                hop_sec=float(sample.get("scene_audio_hop_sec") or 0.5),
+            )
 
         result = {"scene_audio": scene_audio}
         if "scene_audio_timestamps" in sample:
             result["scene_audio_timestamps"] = torch.as_tensor(sample["scene_audio_timestamps"], dtype=torch.float32)
+        elif generated_timestamps is not None:
+            result["scene_audio_timestamps"] = generated_timestamps
         if "frame_timestamps" in sample:
             result["frame_timestamps"] = torch.as_tensor(sample["frame_timestamps"], dtype=torch.float32)
         for key in ("event_labels", "offset_labels", "gate_labels", "pseudo_confidence"):
@@ -1573,6 +1598,39 @@ def _scene_audio_to_tensor(value, folder: Optional[str] = None) -> torch.Tensor:
     if tensor.ndim != 2:
         raise ValueError(f"scene_audio must be shaped [T,D] after loading, got {tuple(tensor.shape)}")
     return tensor.to(dtype=torch.float32)
+
+
+def _load_scene_audio_media(
+    path_value: str,
+    folder: Optional[str],
+    sample_rate: int,
+    window_sec: float,
+    hop_sec: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    from intersuit.streaming.audio_stream import (
+        load_scene_audio,
+        split_audio_windows,
+        stack_audio_windows,
+    )
+
+    path = path_value if os.path.isabs(path_value) else os.path.join(folder or "", path_value)
+    waveform, actual_rate = load_scene_audio(
+        path,
+        sample_rate=sample_rate,
+        mono=True,
+    )
+    windows = split_audio_windows(
+        waveform,
+        actual_rate,
+        window_sec=window_sec,
+        hop_sec=hop_sec,
+    )
+    samples, timestamps = stack_audio_windows(windows)
+    if samples.numel() == 0:
+        raise ValueError(f"scene_audio_path decoded to zero windows: {path}")
+    if not torch.isfinite(samples).all() or not torch.isfinite(timestamps).all():
+        raise ValueError(f"scene_audio_path contains NaN/Inf after decoding: {path}")
+    return samples, timestamps
 
 
 def _load_feature_tensor(value, folder: Optional[str] = None) -> torch.Tensor:
@@ -2020,12 +2078,25 @@ def train(attn_implementation=None):
                 for p in model.get_model().speech_projector.parameters():
                     p.requires_grad = True
             if "scene_audio_encoder" in tunable_parts and model_args.enable_scene_audio:
+                if str(model_args.scene_audio_encoder_type).lower() == "beats":
+                    raise ValueError(
+                        "冻结 BEATs 不能使用 scene_audio_encoder 全量解冻；"
+                        "请使用 scene_audio_projector。"
+                    )
                 for name, param in model.named_parameters():
                     if "scene_audio_encoder" in name:
+                        param.requires_grad_(True)
+            if "scene_audio_projector" in tunable_parts and model_args.enable_scene_audio:
+                for name, param in model.named_parameters():
+                    if "scene_audio_encoder.audio_projector" in name:
                         param.requires_grad_(True)
             if "streaming_av_module" in tunable_parts and model_args.enable_scene_audio:
                 for name, param in model.named_parameters():
                     if "streaming_av_module" in name:
+                        param.requires_grad_(True)
+            if "streaming_av_fusion" in tunable_parts and model_args.enable_scene_audio:
+                for name, param in model.named_parameters():
+                    if "streaming_av_module.fusion" in name:
                         param.requires_grad_(True)
             if "mm_language_model" in tunable_parts:
                 for name, param in model.named_parameters():

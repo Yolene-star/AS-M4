@@ -7,7 +7,10 @@ same contract without changing event detection, alignment, or fusion code.
 
 from __future__ import annotations
 
+import hashlib
+import importlib
 from pathlib import Path
+import sys
 from typing import NamedTuple
 
 import torch
@@ -211,6 +214,144 @@ class FrozenTorchaudioSceneAudioEncoder(nn.Module):
         )
 
 
+class FrozenBEATsSceneAudioEncoder(nn.Module):
+    """Frozen local BEATs encoder followed by a trainable audio projector.
+
+    BEATs is intentionally kept outside the registered module tree. Its
+    external checkpoint remains the source of truth and is not duplicated in
+    every M4 checkpoint; only ``audio_projector`` is trainable and saved.
+    """
+
+    def __init__(
+        self,
+        hidden_size: int,
+        checkpoint_path: str,
+        code_root: str,
+        sample_rate: int = 16000,
+        expected_sha256: str | None = None,
+    ) -> None:
+        super().__init__()
+        if hidden_size <= 0:
+            raise ValueError("hidden_size must be positive")
+        if sample_rate != 16000:
+            raise ValueError("BEATs scene audio currently requires 16000 Hz input")
+
+        checkpoint = _resolve_local_file(checkpoint_path, "BEATs checkpoint")
+        source = _resolve_local_file(Path(code_root) / "beats/BEATs.py", "BEATs source")
+        checkpoint_sha256 = _sha256_file(checkpoint)
+        if expected_sha256 and checkpoint_sha256 != str(expected_sha256).lower():
+            raise ValueError(
+                f"BEATs checkpoint SHA256 mismatch: expected={expected_sha256}, "
+                f"actual={checkpoint_sha256}"
+            )
+
+        source_root = source.parents[1]
+        if str(source_root) not in sys.path:
+            sys.path.insert(0, str(source_root))
+        beats_module = importlib.import_module("beats.BEATs")
+        beats_config = getattr(beats_module, "BEATsConfig")
+        beats_class = getattr(beats_module, "BEATs")
+
+        try:
+            payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+        except TypeError:
+            payload = torch.load(checkpoint, map_location="cpu")
+        if not isinstance(payload, dict):
+            raise ValueError("BEATs checkpoint must contain a dictionary")
+        cfg = payload.get("cfg") or payload.get("config") or {}
+        state = payload.get("model") or payload.get("state_dict") or payload
+        if not isinstance(state, dict):
+            raise ValueError("BEATs checkpoint does not contain model weights")
+
+        beats = beats_class(beats_config(cfg))
+        incompatible = beats.load_state_dict(_strip_module_prefix(state), strict=False)
+        allowed_missing = {"predictor.weight", "predictor.bias"}
+        disallowed_missing = sorted(set(incompatible.missing_keys) - allowed_missing)
+        if disallowed_missing or incompatible.unexpected_keys:
+            raise ValueError(
+                "BEATs checkpoint is incompatible with the local source: "
+                f"missing={disallowed_missing}, unexpected={incompatible.unexpected_keys}"
+            )
+        beats.eval()
+        for param in beats.parameters():
+            param.requires_grad = False
+        object.__setattr__(self, "_beats_model", beats)
+
+        encoder_dim = int(getattr(beats.cfg, "encoder_embed_dim", 0))
+        if encoder_dim <= 0:
+            raise ValueError("BEATs config does not expose encoder_embed_dim")
+        self.audio_projector = nn.Linear(encoder_dim, int(hidden_size))
+        nn.init.xavier_uniform_(self.audio_projector.weight)
+        nn.init.zeros_(self.audio_projector.bias)
+
+        self.hidden_size = int(hidden_size)
+        self.encoder_dim = encoder_dim
+        self.sample_rate = int(sample_rate)
+        self.checkpoint_path = str(checkpoint)
+        self.code_root = str(source_root)
+        self.checkpoint_sha256 = checkpoint_sha256
+        self.feature_kind = "beats_projected_semantic"
+
+    @property
+    def beats_model(self) -> nn.Module:
+        return object.__getattribute__(self, "_beats_model")
+
+    def _apply(self, fn):
+        super()._apply(fn)
+        self.beats_model._apply(fn)
+        return self
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        self.beats_model.eval()
+        return self
+
+    def forward(
+        self,
+        audio_windows: torch.Tensor,
+        sample_mask: torch.Tensor | None = None,
+        timestamps: torch.Tensor | None = None,
+    ) -> SceneAudioEncoderOutput:
+        windows = _ensure_batched_windows(audio_windows)
+        batch, steps, _ = windows.shape
+        if sample_mask is None:
+            mask = torch.ones(batch, steps, dtype=torch.bool, device=windows.device)
+        else:
+            mask = sample_mask.to(device=windows.device, dtype=torch.bool)
+            if mask.shape != (batch, steps):
+                raise ValueError(f"sample_mask shape {tuple(mask.shape)} does not match {(batch, steps)}")
+
+        flat = windows.detach().float().cpu().reshape(batch * steps, -1)
+        fbanks = torch.stack([_waveform_to_fbank(window, self.sample_rate) for window in flat])
+        beats_param = next(self.beats_model.parameters())
+        fbanks = fbanks.to(device=beats_param.device, dtype=beats_param.dtype)
+        with torch.no_grad():
+            encoded, _, _ = self.beats_model.extract_features(
+                fbanks,
+                padding_mask=None,
+                feature_only=True,
+            )
+            pooled = encoded.float().mean(dim=1)
+        if not torch.isfinite(pooled).all():
+            raise ValueError("BEATs produced NaN/Inf embeddings")
+
+        projected = self.audio_projector(
+            pooled.to(
+                device=self.audio_projector.weight.device,
+                dtype=self.audio_projector.weight.dtype,
+            )
+        )
+        projected = projected.reshape(batch, steps, self.hidden_size)
+        projected = projected.masked_fill(~mask.to(projected.device).unsqueeze(-1), 0.0)
+        valid_timestamps = _validate_timestamps(timestamps, batch, steps, projected.device)
+        return SceneAudioEncoderOutput(
+            features=projected,
+            mask=mask.to(projected.device),
+            timestamps=valid_timestamps,
+            feature_kind=self.feature_kind,
+        )
+
+
 def _ensure_batched_windows(audio_windows: torch.Tensor) -> torch.Tensor:
     if audio_windows.ndim == 2:
         audio_windows = audio_windows.unsqueeze(0)
@@ -299,3 +440,48 @@ def _expand_to_hidden(features: torch.Tensor, hidden_size: int) -> torch.Tensor:
 def _lengths_to_mask(lengths: torch.Tensor, max_length: int) -> torch.Tensor:
     positions = torch.arange(max_length, device=lengths.device).unsqueeze(0)
     return positions < lengths.unsqueeze(1)
+
+
+def _resolve_local_file(path_value: str | Path, label: str) -> Path:
+    path = Path(path_value).expanduser()
+    repo_root = Path(__file__).resolve().parents[4]
+    candidates = [path] if path.is_absolute() else [
+        (Path.cwd() / path).resolve(),
+        (repo_root / path).resolve(),
+        (repo_root / "intersuit" / path).resolve(),
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(
+        f"{label} not found: {path_value}. Automatic downloads are disabled."
+    )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _strip_module_prefix(state: dict) -> dict:
+    return {
+        key.removeprefix("module."): value
+        for key, value in state.items()
+        if torch.is_tensor(value)
+    }
+
+
+def _waveform_to_fbank(waveform: torch.Tensor, sample_rate: int) -> torch.Tensor:
+    import torchaudio.compliance.kaldi as ta_kaldi
+
+    mono = waveform.float().flatten().unsqueeze(0)
+    return ta_kaldi.fbank(
+        mono * (2**15),
+        num_mel_bins=128,
+        sample_frequency=sample_rate,
+        frame_length=25,
+        frame_shift=10,
+    )

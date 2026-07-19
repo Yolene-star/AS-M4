@@ -207,6 +207,19 @@ class LlavaMetaModel:
             getattr(model_args, "scene_audio_torchaudio_weight_path", None) or None
         )
         self.config.scene_audio_sample_rate = getattr(model_args, "scene_audio_sample_rate", 16000)
+        self.config.scene_audio_beats_checkpoint = getattr(
+            model_args,
+            "scene_audio_beats_checkpoint",
+            "intersuit/checkpoints/BEATs_iter3_plus_AS2M.pt",
+        )
+        self.config.scene_audio_beats_code_root = getattr(
+            model_args,
+            "scene_audio_beats_code_root",
+            "third_party/OmniMMI/baselines/videollama2/model",
+        )
+        self.config.scene_audio_beats_checkpoint_sha256 = (
+            getattr(model_args, "scene_audio_beats_checkpoint_sha256", None) or None
+        )
         self.config.num_audio_events = getattr(model_args, "num_audio_events", 25)
         self.config.audio_quality_dim = getattr(model_args, "audio_quality_dim", 1)
         self.config.streaming_av_align_dim = getattr(model_args, "streaming_av_align_dim", self.config.hidden_size)
@@ -217,6 +230,16 @@ class LlavaMetaModel:
         self.config.enable_scene_audio = getattr(model_args, "enable_scene_audio", True)
         self.config.as_m4_fusion_init = getattr(model_args, "as_m4_fusion_init", "zero")
         self.config.as_m4_gate_logit_bias = getattr(model_args, "as_m4_gate_logit_bias", -5.0)
+        self.config.as_m4_fusion_mode = getattr(
+            model_args,
+            "as_m4_fusion_mode",
+            "aligned_gated",
+        )
+        self.config.as_m4_simple_audio_gate = getattr(
+            model_args,
+            "as_m4_simple_audio_gate",
+            1.0,
+        )
         self.config.enable_audio_confidence_gate_v1 = getattr(
             model_args, "enable_audio_confidence_gate_v1", False
         )
@@ -346,6 +369,33 @@ def _timestamps_to_centers(timestamps, batch_idx, steps, device, dtype):
     return centers[:steps].unsqueeze(0)
 
 
+def _linearly_align_audio_windows(audio, audio_mask, num_frames):
+    """Map fixed audio windows to video frames without learned alignment."""
+
+    if audio.ndim != 3 or audio.shape[0] != 1:
+        raise ValueError("Simple BEATs alignment expects audio shaped [1,T,H]")
+    if num_frames <= 0:
+        raise ValueError("num_frames must be positive")
+    valid = audio[0][audio_mask[0].to(dtype=torch.bool)]
+    if valid.shape[0] == 0:
+        return torch.zeros(
+            1,
+            num_frames,
+            audio.shape[-1],
+            device=audio.device,
+            dtype=audio.dtype,
+        )
+    if valid.shape[0] == 1:
+        return valid.unsqueeze(0).expand(1, num_frames, -1)
+    aligned = nn.functional.interpolate(
+        valid.transpose(0, 1).unsqueeze(0).float(),
+        size=num_frames,
+        mode="linear",
+        align_corners=False,
+    )
+    return aligned.squeeze(0).transpose(0, 1).unsqueeze(0).to(dtype=audio.dtype)
+
+
 def _pool_question_text_features(embed_tokens, input_ids, attention_mask=None):
     """Mean-pool valid prompt token embeddings without embedding MM sentinels."""
 
@@ -473,6 +523,76 @@ class LlavaMetaForCausalLM(ABC):
             video = feature.unsqueeze(0)
             num_audio = audio.shape[1]
             num_frames = video.shape[1]
+
+            fusion_mode = str(
+                getattr(self.config, "as_m4_fusion_mode", "aligned_gated")
+            )
+            if fusion_mode == "beats_simple_residual":
+                frame_audio = _linearly_align_audio_windows(
+                    audio,
+                    audio_mask,
+                    num_frames,
+                )
+                gate_value = (
+                    float(force_audio_gate)
+                    if force_audio_gate is not None
+                    else float(getattr(self.config, "as_m4_simple_audio_gate", 1.0))
+                )
+                if not math.isfinite(gate_value) or not 0.0 <= gate_value <= 1.0:
+                    raise ValueError("as_m4_simple_audio_gate must be finite and in [0,1]")
+                gate = torch.full(
+                    (1, num_frames),
+                    gate_value,
+                    device=feature.device,
+                    dtype=feature.dtype,
+                )
+                audio_delta = streaming_av_module.fusion.audio_delta(frame_audio)
+                raw_delta = (
+                    float(audio_residual_scale)
+                    * gate.view(1, num_frames, 1, 1)
+                    * audio_delta.unsqueeze(2)
+                )
+                capped_delta, cap_diagnostics = apply_audio_delta_ratio_cap(
+                    video,
+                    raw_delta,
+                    ratio_cap=audio_delta_ratio_cap,
+                )
+                fused_features.append((video + capped_delta).squeeze(0))
+                diagnostics.append(
+                    {
+                        "fusion_mode": fusion_mode,
+                        "dynamic_alignment_enabled": False,
+                        "learned_gate_enabled": False,
+                        "gate": gate.detach(),
+                        "gate_mean": gate.detach().float().mean(),
+                        "gate_max": gate.detach().float().max(),
+                        "gate_min": gate.detach().float().min(),
+                        "video_norm": cap_diagnostics["video_norm"][0],
+                        "audio_norm": frame_audio.detach().float().norm(),
+                        "delta_norm": cap_diagnostics["capped_delta_norm"][0],
+                        "delta_to_video_ratio": cap_diagnostics[
+                            "capped_delta_to_video_ratio"
+                        ][0],
+                        "raw_delta_norm": cap_diagnostics["raw_delta_norm"][0],
+                        "raw_delta_to_video_ratio": cap_diagnostics[
+                            "raw_delta_to_video_ratio"
+                        ][0],
+                        "audio_delta_cap": float(audio_delta_ratio_cap),
+                        "audio_delta_applied_scale": cap_diagnostics[
+                            "audio_delta_applied_scale"
+                        ][0],
+                        "capped_delta_norm": cap_diagnostics[
+                            "capped_delta_norm"
+                        ][0],
+                        "capped_delta_to_video_ratio": cap_diagnostics[
+                            "capped_delta_to_video_ratio"
+                        ][0],
+                        "audio_residual_scale": float(audio_residual_scale),
+                    }
+                )
+                continue
+            if fusion_mode != "aligned_gated":
+                raise ValueError(f"Unknown AS-M4 fusion mode: {fusion_mode}")
 
             audio_times = _timestamps_to_centers(
                 scene_audio_timestamps,
