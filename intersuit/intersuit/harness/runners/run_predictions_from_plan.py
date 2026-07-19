@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -31,6 +32,25 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
 def load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def verify_manifest_lock(exp: dict[str, Any], manifest: Path) -> None:
+    expected = str(exp.get("manifest_sha256") or "").strip().lower()
+    if not expected:
+        return
+    actual = sha256_file(manifest)
+    if actual != expected:
+        raise RuntimeError(
+            f"{exp['id']} manifest SHA256 不匹配：expected={expected}, actual={actual}"
+        )
 
 
 def iter_qa_samples(manifest: Path, limit: int | None = None) -> list[dict[str, Any]]:
@@ -756,9 +776,10 @@ def run_predictions(
         num_selected += 1
         output_jsonl = Path(str(exp["output_jsonl"]))
         outputs.append(str(output_jsonl))
+        manifest = Path(str(exp["manifest"]))
+        verify_manifest_lock(exp, manifest)
         if dry_run:
             continue
-        manifest = Path(str(exp["manifest"]))
         all_samples = iter_qa_samples(manifest, limit=None)
         samples = all_samples[:limit] if limit is not None else all_samples
         output_jsonl.parent.mkdir(parents=True, exist_ok=True)

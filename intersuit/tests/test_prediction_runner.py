@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 import torch
 
 
@@ -166,6 +167,45 @@ def test_dry_run_does_not_create_prediction_files(tmp_path):
 
     assert result["dry_run"] is True
     assert not pred.exists()
+
+
+def test_manifest_sha256_lock_rejects_changed_manifest(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    _write_json(
+        manifest,
+        [
+            {
+                "id": "s0",
+                "conversations": [
+                    {"from": "human", "value": "Q"},
+                    {"from": "gpt", "value": "A"},
+                ],
+            }
+        ],
+    )
+    plan = tmp_path / "plan.jsonl"
+    plan.write_text(
+        json.dumps(
+            {
+                "id": "LOCKED",
+                "manifest": str(manifest),
+                "manifest_sha256": "0" * 64,
+                "output_jsonl": str(tmp_path / "predictions.jsonl"),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="manifest SHA256 不匹配"):
+        runner.run_predictions(
+            plan,
+            backend="oracle",
+            limit=1,
+            feature_root=tmp_path,
+            device="cpu",
+            max_new_tokens=4,
+        )
 
 
 def test_experiment_filter_runs_only_requested_ids(tmp_path):
