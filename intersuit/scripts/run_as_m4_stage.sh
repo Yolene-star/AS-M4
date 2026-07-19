@@ -22,6 +22,7 @@ export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
 export NCCL_P2P_DISABLE=1
 export NCCL_SHM_DISABLE=1
 export NCCL_IB_DISABLE=1
+export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-lo}"
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 export MODEL_MAX_LENGTH="${MODEL_MAX_LENGTH:-12288}"
@@ -34,12 +35,45 @@ export AS_M4_ENABLE_SCENE_AUDIO="${AS_M4_ENABLE_SCENE_AUDIO:-1}"
 export AS_M4_SCENE_AUDIO_ENCODER_TYPE="${AS_M4_SCENE_AUDIO_ENCODER_TYPE:-dummy}"
 export AS_M4_STREAMING_AV_LR="${AS_M4_STREAMING_AV_LR:-1e-4}"
 export AS_M4_SCENE_AUDIO_PROJECTOR_LR="${AS_M4_SCENE_AUDIO_PROJECTOR_LR:-1e-4}"
+export AS_M4_FUSION_INIT="${AS_M4_FUSION_INIT:-zero}"
+export AS_M4_GATE_LOGIT_BIAS="${AS_M4_GATE_LOGIT_BIAS:--5.0}"
 export AS_M4_FORCE_AUDIO_GATE="${AS_M4_FORCE_AUDIO_GATE:-}"
+export AS_M4_ROLLBACK_MODE="${AS_M4_ROLLBACK_MODE:-none}"
+export AS_M4_BASELINE_CKPT_12K="${AS_M4_BASELINE_CKPT_12K:-checkpoints/M4-LongVA-7B-Qwen2-train-12k-lowmem-nofreeze}"
+export AS_M4_BASELINE_CKPT_32K="${AS_M4_BASELINE_CKPT_32K:-checkpoints/M4-LongVA-7B-Qwen2-repro-32k-lowmem-nofreeze-v1}"
+export CKPT_PATH="${CKPT_PATH:-checkpoints/M4-LongVA-7B-Qwen2}"
 export MM_TUNABLE_PARTS="${MM_TUNABLE_PARTS:-mm_vision_tower,mm_mlp_adapter,mm_language_model,streaming_av_module}"
 export DATA_PATH="${DATA_PATH:-inputs/texts/m4-it-qwen.json}"
 export VIDEO_FEATURE_FOLDER="${VIDEO_FEATURE_FOLDER:-}"
 export SAVE_STEPS="${SAVE_STEPS:-25}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+
+case "$AS_M4_ROLLBACK_MODE" in
+  none)
+    ;;
+  behavior)
+    export AS_M4_ENABLE_SCENE_AUDIO=0
+    export AS_M4_FORCE_AUDIO_GATE="${AS_M4_FORCE_AUDIO_GATE:-0}"
+    ;;
+  gate0)
+    export AS_M4_FORCE_AUDIO_GATE="${AS_M4_FORCE_AUDIO_GATE:-0}"
+    ;;
+  weights12k)
+    export CKPT_PATH="$AS_M4_BASELINE_CKPT_12K"
+    export AS_M4_ENABLE_SCENE_AUDIO=0
+    export AS_M4_FORCE_AUDIO_GATE="${AS_M4_FORCE_AUDIO_GATE:-0}"
+    ;;
+  weights32k)
+    export CKPT_PATH="$AS_M4_BASELINE_CKPT_32K"
+    export AS_M4_ENABLE_SCENE_AUDIO=0
+    export AS_M4_FORCE_AUDIO_GATE="${AS_M4_FORCE_AUDIO_GATE:-0}"
+    ;;
+  *)
+    echo "未知 AS_M4_ROLLBACK_MODE：$AS_M4_ROLLBACK_MODE" >&2
+    echo "可用值：none, behavior, gate0, weights12k, weights32k" >&2
+    exit 2
+    ;;
+esac
 
 case "$STAGE" in
   12k-smoke)
@@ -83,16 +117,28 @@ esac
 STAMP="$(date +%Y%m%d_%H%M%S)"
 CONFIG_FILE="$LOG_DIR/${MID_RUN_NAME}_${STAMP}.env"
 LOG_FILE="$LOG_DIR/${MID_RUN_NAME}_${STAMP}.log"
+if [[ -e "$CONFIG_FILE" || -e "$LOG_FILE" ]]; then
+  SUFFIX=2
+  while [[ -e "$LOG_DIR/${MID_RUN_NAME}_${STAMP}-v${SUFFIX}.env" || -e "$LOG_DIR/${MID_RUN_NAME}_${STAMP}-v${SUFFIX}.log" ]]; do
+    SUFFIX=$((SUFFIX + 1))
+  done
+  CONFIG_FILE="$LOG_DIR/${MID_RUN_NAME}_${STAMP}-v${SUFFIX}.env"
+  LOG_FILE="$LOG_DIR/${MID_RUN_NAME}_${STAMP}-v${SUFFIX}.log"
+fi
 
 {
   echo "STAGE=$STAGE"
   echo "START_TIME=$(date '+%Y-%m-%d %H:%M:%S')"
   echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
   echo "NUM_GPUS=$NUM_GPUS"
+  echo "NCCL_SOCKET_IFNAME=$NCCL_SOCKET_IFNAME"
   echo "MODEL_MAX_LENGTH=$MODEL_MAX_LENGTH"
   echo "MAX_STEPS=${MAX_STEPS:-}"
   echo "MID_RUN_NAME=$MID_RUN_NAME"
+  echo "CKPT_PATH=$CKPT_PATH"
   echo "DEEPSPEED_CONFIG=$DEEPSPEED_CONFIG"
+  echo "TORCHDYNAMO_DISABLE=${TORCHDYNAMO_DISABLE:-}"
+  echo "DDP_FIND_UNUSED_PARAMETERS=${DDP_FIND_UNUSED_PARAMETERS:-}"
   echo "M4_CHUNKED_LM_LOSS=$M4_CHUNKED_LM_LOSS"
   echo "M4_CHUNKED_LM_LOSS_TOKENS=$M4_CHUNKED_LM_LOSS_TOKENS"
   echo "M4_CHUNKED_LM_LOSS_CHECKPOINT=$M4_CHUNKED_LM_LOSS_CHECKPOINT"
@@ -101,7 +147,12 @@ LOG_FILE="$LOG_DIR/${MID_RUN_NAME}_${STAMP}.log"
   echo "AS_M4_SCENE_AUDIO_ENCODER_TYPE=$AS_M4_SCENE_AUDIO_ENCODER_TYPE"
   echo "AS_M4_STREAMING_AV_LR=$AS_M4_STREAMING_AV_LR"
   echo "AS_M4_SCENE_AUDIO_PROJECTOR_LR=$AS_M4_SCENE_AUDIO_PROJECTOR_LR"
+  echo "AS_M4_FUSION_INIT=$AS_M4_FUSION_INIT"
+  echo "AS_M4_GATE_LOGIT_BIAS=$AS_M4_GATE_LOGIT_BIAS"
   echo "AS_M4_FORCE_AUDIO_GATE=$AS_M4_FORCE_AUDIO_GATE"
+  echo "AS_M4_ROLLBACK_MODE=$AS_M4_ROLLBACK_MODE"
+  echo "AS_M4_BASELINE_CKPT_12K=$AS_M4_BASELINE_CKPT_12K"
+  echo "AS_M4_BASELINE_CKPT_32K=$AS_M4_BASELINE_CKPT_32K"
   echo "MM_TUNABLE_PARTS=$MM_TUNABLE_PARTS"
   echo "DATA_PATH=$DATA_PATH"
   echo "VIDEO_FEATURE_FOLDER=$VIDEO_FEATURE_FOLDER"
@@ -119,7 +170,9 @@ if [[ -e "checkpoints/$MID_RUN_NAME" ]]; then
 fi
 
 if [[ "${RUN_PREFLIGHT:-1}" == "1" ]]; then
-  python scripts/check_m4_repro_preflight.py --allowed_power_limits "${ALLOWED_POWER_LIMITS:-300.00 W,450.00 W}"
+  python scripts/check_m4_repro_preflight.py \
+    --allowed_power_limits "${ALLOWED_POWER_LIMITS:-300.00 W,450.00 W}" \
+    --expected_nccl_socket_ifname "$NCCL_SOCKET_IFNAME"
 fi
 
 echo "日志文件：$LOG_FILE"

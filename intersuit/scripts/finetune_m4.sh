@@ -75,6 +75,27 @@ AS_M4_ENABLE_SCENE_AUDIO_BOOL=False
 if [ "${AS_M4_ENABLE_SCENE_AUDIO:-0}" = "1" ] || [ "${AS_M4_ENABLE_SCENE_AUDIO:-false}" = "true" ] || [ "${AS_M4_ENABLE_SCENE_AUDIO:-False}" = "True" ]; then
     AS_M4_ENABLE_SCENE_AUDIO_BOOL=True
 fi
+AS_M4_ROLLBACK_MODE="${AS_M4_ROLLBACK_MODE:-none}"
+echo "AS_M4_ROLLBACK_MODE=${AS_M4_ROLLBACK_MODE}"
+if [ "${AS_M4_ROLLBACK_MODE}" = "behavior" ]; then
+    AS_M4_ENABLE_SCENE_AUDIO_BOOL=False
+    export AS_M4_FORCE_AUDIO_GATE="${AS_M4_FORCE_AUDIO_GATE:-0}"
+    echo "AS-M4 behavior rollback: disable scene_audio path and force audio gate to ${AS_M4_FORCE_AUDIO_GATE}."
+elif [ "${AS_M4_ROLLBACK_MODE}" = "gate0" ]; then
+    export AS_M4_FORCE_AUDIO_GATE="${AS_M4_FORCE_AUDIO_GATE:-0}"
+    echo "AS-M4 gate rollback: keep scene_audio probes but force residual fusion gate to ${AS_M4_FORCE_AUDIO_GATE}."
+elif [ "${AS_M4_ROLLBACK_MODE}" = "weights12k" ]; then
+    CKPT_PATH="${AS_M4_BASELINE_CKPT_12K:-checkpoints/M4-LongVA-7B-Qwen2-train-12k-lowmem-nofreeze}"
+    AS_M4_ENABLE_SCENE_AUDIO_BOOL=False
+    echo "AS-M4 weight rollback: loading 12k baseline checkpoint ${CKPT_PATH} and disabling scene_audio."
+elif [ "${AS_M4_ROLLBACK_MODE}" = "weights32k" ]; then
+    CKPT_PATH="${AS_M4_BASELINE_CKPT_32K:-checkpoints/M4-LongVA-7B-Qwen2-repro-32k-lowmem-nofreeze-v1}"
+    AS_M4_ENABLE_SCENE_AUDIO_BOOL=False
+    echo "AS-M4 weight rollback: loading 32k baseline checkpoint ${CKPT_PATH} and disabling scene_audio."
+elif [ "${AS_M4_ROLLBACK_MODE}" != "none" ]; then
+    echo "错误：未知 AS_M4_ROLLBACK_MODE=${AS_M4_ROLLBACK_MODE}。可用值：none, behavior, gate0, weights12k, weights32k。" >&2
+    exit 2
+fi
 
 if [ -n "${RESUME_FROM_CHECKPOINT:-}" ] && [ "${DEEPSPEED_CONFIG}" = "scripts/zero3_lowmem.json" ] && [ "${M4_ALLOW_ZERO3_LOWMEM_RESUME:-0}" != "1" ]; then
     echo "错误：不能用 scripts/zero3_lowmem.json 直接恢复已有 ZeRO-3 checkpoint。"
@@ -100,13 +121,24 @@ fi
 EXTRA_TRAIN_ARGS+=(--as_m4_fusion_init "${AS_M4_FUSION_INIT:-zero}")
 EXTRA_TRAIN_ARGS+=(--as_m4_gate_logit_bias "${AS_M4_GATE_LOGIT_BIAS:--5.0}")
 
+DEEPSPEED_ARGS=()
+if [ -n "${DEEPSPEED_CONFIG:-}" ] && [ "${DEEPSPEED_CONFIG}" != "none" ] && [ "${DEEPSPEED_CONFIG}" != "NONE" ]; then
+    DEEPSPEED_ARGS+=(--deepspeed "${DEEPSPEED_CONFIG}")
+else
+    echo "DEEPSPEED_CONFIG=${DEEPSPEED_CONFIG:-}: 不传 --deepspeed，使用普通 DDP/单卡训练路径。"
+    export TORCHDYNAMO_DISABLE="${TORCHDYNAMO_DISABLE:-1}"
+    echo "TORCHDYNAMO_DISABLE=$TORCHDYNAMO_DISABLE：DDP-only smoke 默认关闭 TorchDynamo，避免 DDPOptimizer higher-order op 失败。"
+    export DDP_FIND_UNUSED_PARAMETERS="${DDP_FIND_UNUSED_PARAMETERS:-True}"
+    echo "DDP_FIND_UNUSED_PARAMETERS=$DDP_FIND_UNUSED_PARAMETERS：AS-only smoke 允许尚未接入辅助 loss 的 head 暂时无梯度。"
+fi
+
 if command -v module >/dev/null 2>&1; then
     module add cuda11.8
 fi
 
 ACCELERATE_CPU_AFFINITY=1 "$TORCHRUN" --nproc_per_node="${NUM_GPUS}" --master_port="${PORT}" \
     intersuit/train/train_mem.py \
-    --deepspeed "${DEEPSPEED_CONFIG}" \
+    "${DEEPSPEED_ARGS[@]}" \
     --model_name_or_path ${CKPT_PATH} \
     --version ${PROMPT_VERSION} \
     --data_path "${DATA_PATH}" \
@@ -118,6 +150,8 @@ ACCELERATE_CPU_AFFINITY=1 "$TORCHRUN" --nproc_per_node="${NUM_GPUS}" --master_po
     --mm_projector_type mlp2x_gelu \
     --enable_scene_audio "${AS_M4_ENABLE_SCENE_AUDIO_BOOL}" \
     --scene_audio_encoder_type "${AS_M4_SCENE_AUDIO_ENCODER_TYPE:-dummy}" \
+    --scene_audio_torchaudio_bundle "${AS_M4_SCENE_AUDIO_TORCHAUDIO_BUNDLE:-WAV2VEC2_BASE}" \
+    --scene_audio_sample_rate "${AS_M4_SCENE_AUDIO_SAMPLE_RATE:-16000}" \
     --num_audio_events "${AS_M4_NUM_AUDIO_EVENTS:-25}" \
     --audio_quality_dim "${AS_M4_AUDIO_QUALITY_DIM:-1}" \
     --max_av_offset_sec "${AS_M4_MAX_AV_OFFSET_SEC:-1.5}" \
@@ -150,6 +184,7 @@ ACCELERATE_CPU_AFFINITY=1 "$TORCHRUN" --nproc_per_node="${NUM_GPUS}" --master_po
     --tf32 True \
     --model_max_length "${MODEL_MAX_LENGTH}" \
     --ddp_timeout "${DDP_TIMEOUT}" \
+    --ddp_find_unused_parameters "${DDP_FIND_UNUSED_PARAMETERS:-False}" \
     --gradient_checkpointing True \
     --dataloader_num_workers "${DATALOADER_NUM_WORKERS}" \
     --lazy_preprocess True \
