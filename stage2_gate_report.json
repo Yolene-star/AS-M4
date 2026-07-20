@@ -1,0 +1,81 @@
+{
+  "build_evidence": {
+    "dropped_group_count": 0,
+    "input_sha256": {
+      "ave_annotations": "0d24a9ec5cd4ceb779ebd83d74e83ec8e55c5e468cede3f320fb57346c9dd321",
+      "ave_valid": "7c5a67e34c6dbd53892cb3a66f0fa3886dac77dec3d17986391ec30c7509aa1e",
+      "stage1_fields": "8c4c4a18388dfc0d1c781bbc2cad77ead85c242aed743fd7d6b7b524d36fe8ff"
+    },
+    "post_dedup_physical_media_count": 1420,
+    "pre_dedup_physical_media_count": 1420,
+    "status": "PASS"
+  },
+  "error_count": 0,
+  "external_media_sha256_overlap_count": 0,
+  "external_video_id_overlap_count": 0,
+  "external_youtube_id_overlap_count": 0,
+  "full_decode": true,
+  "launcher_content_gate": {
+    "gate_only": true,
+    "status": "PASS",
+    "training_started": false
+  },
+  "manifest_sha256": {
+    "dev": "0237cdebfb54c2766cd17ab709293862be381fa17ca809d101fbce37d617fb10",
+    "reserve": "e7ad0ca5a5c8438a2a81e908a7567a5633351fb4f2ae77d074745d6c8ea9a1f0",
+    "train": "aa4ac9e9ca88b19c532e219732ae70b52a3016d76498667788aea4dd843570b8"
+  },
+  "pairwise_overlap": {
+    "dev_reserve": {
+      "derived_media_id_overlap": 0,
+      "media_sha256_overlap": 0,
+      "physical_media_id_overlap": 0,
+      "video_id_overlap": 0,
+      "youtube_id_overlap": 0
+    },
+    "train_dev": {
+      "derived_media_id_overlap": 0,
+      "media_sha256_overlap": 0,
+      "physical_media_id_overlap": 0,
+      "video_id_overlap": 0,
+      "youtube_id_overlap": 0
+    },
+    "train_reserve": {
+      "derived_media_id_overlap": 0,
+      "media_sha256_overlap": 0,
+      "physical_media_id_overlap": 0,
+      "video_id_overlap": 0,
+      "youtube_id_overlap": 0
+    }
+  },
+  "runtime_smoke": {
+    "collator_batch_size": 2,
+    "dataset_length": 2430,
+    "scene_audio_mask_nonempty": true,
+    "scene_audio_shape": [
+      2,
+      20,
+      16000
+    ]
+  },
+  "sample_id_duplicate_count": 0,
+  "scene_audio_path_valid_rate": 1.0,
+  "split_physical_group_count": {
+    "dev": 294,
+    "reserve": 118,
+    "train": 984
+  },
+  "split_physical_media_count": {
+    "dev": 300,
+    "reserve": 120,
+    "train": 1000
+  },
+  "split_qa_count": {
+    "dev": 780,
+    "reserve": 326,
+    "train": 2430
+  },
+  "status": "PASS",
+  "training_started": false,
+  "video_audio_decode_rate": 1.0
+}

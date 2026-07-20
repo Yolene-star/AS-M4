@@ -1,0 +1,38 @@
+{
+  "dev": {
+    "physical_media_count": {
+      "audio": 300,
+      "audio_visual": 120,
+      "visual": 210
+    },
+    "qa_count": {
+      "audio": 322,
+      "audio_visual": 236,
+      "visual": 222
+    }
+  },
+  "reserve": {
+    "physical_media_count": {
+      "audio": 120,
+      "audio_visual": 48,
+      "visual": 85
+    },
+    "qa_count": {
+      "audio": 134,
+      "audio_visual": 101,
+      "visual": 91
+    }
+  },
+  "train": {
+    "physical_media_count": {
+      "audio": 920,
+      "audio_visual": 380,
+      "visual": 699
+    },
+    "qa_count": {
+      "audio": 1003,
+      "audio_visual": 674,
+      "visual": 753
+    }
+  }
+}

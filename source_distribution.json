@@ -1,0 +1,80 @@
+{
+  "dev": {
+    "AVE_HF_EXPANDED": {
+      "physical_group_count": 180,
+      "physical_media_count": 180,
+      "qa_count": 360,
+      "qa_origin_count": {
+        "template": 360
+      }
+    },
+    "AVUT": {
+      "physical_group_count": 90,
+      "physical_media_count": 90,
+      "qa_count": 256,
+      "qa_origin_count": {
+        "human": 256
+      }
+    },
+    "MUSIC-AVQA-v2.0": {
+      "physical_group_count": 24,
+      "physical_media_count": 30,
+      "qa_count": 164,
+      "qa_origin_count": {
+        "template": 164
+      }
+    }
+  },
+  "reserve": {
+    "AVE_HF_EXPANDED": {
+      "physical_group_count": 72,
+      "physical_media_count": 72,
+      "qa_count": 144,
+      "qa_origin_count": {
+        "template": 144
+      }
+    },
+    "AVUT": {
+      "physical_group_count": 35,
+      "physical_media_count": 35,
+      "qa_count": 105,
+      "qa_origin_count": {
+        "human": 105
+      }
+    },
+    "MUSIC-AVQA-v2.0": {
+      "physical_group_count": 11,
+      "physical_media_count": 13,
+      "qa_count": 77,
+      "qa_origin_count": {
+        "template": 77
+      }
+    }
+  },
+  "train": {
+    "AVE_HF_EXPANDED": {
+      "physical_group_count": 600,
+      "physical_media_count": 600,
+      "qa_count": 1200,
+      "qa_origin_count": {
+        "template": 1200
+      }
+    },
+    "AVUT": {
+      "physical_group_count": 299,
+      "physical_media_count": 299,
+      "qa_count": 664,
+      "qa_origin_count": {
+        "human": 664
+      }
+    },
+    "MUSIC-AVQA-v2.0": {
+      "physical_group_count": 85,
+      "physical_media_count": 101,
+      "qa_count": 566,
+      "qa_origin_count": {
+        "template": 566
+      }
+    }
+  }
+}
