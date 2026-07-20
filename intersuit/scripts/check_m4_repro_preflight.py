@@ -39,6 +39,47 @@ def resolve_path(path_text: str) -> Path:
     return path
 
 
+def validate_data_audit(audit: dict) -> tuple[bool, dict]:
+    """Validate either the legacy M4 audit or the Stage 2 manifest gate."""
+
+    if "missing_image_count" in audit or "missing_audio_count" in audit:
+        details = {
+            "audit_format": "legacy_m4",
+            "audit_status": audit.get("status"),
+            "missing_image_count": audit.get("missing_image_count"),
+            "missing_audio_count": audit.get("missing_audio_count"),
+        }
+        passed = (
+            audit.get("missing_image_count") == 0
+            and audit.get("missing_audio_count") == 0
+        )
+        return passed, details
+
+    if "scene_audio_path_valid_rate" in audit or "video_audio_decode_rate" in audit:
+        details = {
+            "audit_format": "stage2_gate",
+            "audit_status": audit.get("status"),
+            "error_count": audit.get("error_count"),
+            "full_decode": audit.get("full_decode"),
+            "scene_audio_path_valid_rate": audit.get("scene_audio_path_valid_rate"),
+            "video_audio_decode_rate": audit.get("video_audio_decode_rate"),
+        }
+        passed = (
+            audit.get("status") == "PASS"
+            and audit.get("error_count") == 0
+            and audit.get("full_decode") is True
+            and audit.get("scene_audio_path_valid_rate") == 1.0
+            and audit.get("video_audio_decode_rate") == 1.0
+        )
+        return passed, details
+
+    return False, {
+        "audit_format": "unknown",
+        "audit_status": audit.get("status"),
+        "reason_zh": "数据审计格式无法识别",
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="检查 M4 复现训练前置条件。")
     parser.add_argument("--stable_gpus", default="0,2,3,4")
@@ -183,14 +224,14 @@ def main() -> None:
     audit_path = resolve_path(args.audit_json)
     if audit_path.exists():
         audit = json.loads(audit_path.read_text(encoding="utf-8"))
-        audit_ok = audit.get("missing_image_count") == 0 and audit.get("missing_audio_count") == 0
-        result["checks"].append({
-            "name": "data_audit",
-            "passed": audit_ok,
-            "audit_status": audit.get("status"),
-            "missing_image_count": audit.get("missing_image_count"),
-            "missing_audio_count": audit.get("missing_audio_count"),
-        })
+        audit_ok, audit_details = validate_data_audit(audit)
+        result["checks"].append(
+            {
+                "name": "data_audit",
+                "passed": audit_ok,
+                **audit_details,
+            }
+        )
         if not audit_ok:
             result["status"] = "fail"
     else:
