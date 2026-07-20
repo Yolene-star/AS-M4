@@ -329,6 +329,32 @@ class FrozenBEATsSceneAudioEncoder(nn.Module):
             if mask.shape != (batch, steps):
                 raise ValueError(f"sample_mask shape {tuple(mask.shape)} does not match {(batch, steps)}")
 
+        pooled = self.encode_raw(windows, sample_mask=mask).features
+        projected = self.project(pooled)
+        valid_timestamps = _validate_timestamps(timestamps, batch, steps, projected.device)
+        return SceneAudioEncoderOutput(
+            features=projected,
+            mask=mask.to(projected.device),
+            timestamps=valid_timestamps,
+            feature_kind=self.feature_kind,
+        )
+
+    def encode_raw(
+        self,
+        audio_windows: torch.Tensor,
+        sample_mask: torch.Tensor | None = None,
+    ) -> SceneAudioEncoderOutput:
+        """Return pooled frozen-BEATs features before the trainable projector."""
+
+        windows = _ensure_batched_windows(audio_windows)
+        batch, steps, _ = windows.shape
+        if sample_mask is None:
+            mask = torch.ones(batch, steps, dtype=torch.bool, device=windows.device)
+        else:
+            mask = sample_mask.to(device=windows.device, dtype=torch.bool)
+            if mask.shape != (batch, steps):
+                raise ValueError(f"sample_mask shape {tuple(mask.shape)} does not match {(batch, steps)}")
+
         flat = windows.detach().float().cpu().reshape(batch * steps, -1)
         fbanks = torch.stack([_waveform_to_fbank(window, self.sample_rate) for window in flat])
         beats_param = next(self.beats_model.parameters())
@@ -342,22 +368,23 @@ class FrozenBEATsSceneAudioEncoder(nn.Module):
             pooled = encoded.float().mean(dim=1)
         if not torch.isfinite(pooled).all():
             raise ValueError("BEATs produced NaN/Inf embeddings")
-
-        projected = self.audio_projector(
-            pooled.to(
-                device=self.audio_projector.weight.device,
-                dtype=self.audio_projector.weight.dtype,
-            )
-        )
-        projected = projected.reshape(batch, steps, self.hidden_size)
-        projected = projected.masked_fill(~mask.to(projected.device).unsqueeze(-1), 0.0)
-        valid_timestamps = _validate_timestamps(timestamps, batch, steps, projected.device)
+        pooled = pooled.reshape(batch, steps, self.encoder_dim)
+        pooled = pooled.masked_fill(~mask.to(pooled.device).unsqueeze(-1), 0.0)
         return SceneAudioEncoderOutput(
-            features=projected,
-            mask=mask.to(projected.device),
-            timestamps=valid_timestamps,
-            feature_kind=self.feature_kind,
+            features=pooled,
+            mask=mask.to(pooled.device),
+            timestamps=None,
+            feature_kind="beats_raw",
         )
+
+    def project(self, raw_features: torch.Tensor) -> torch.Tensor:
+        """Map pooled BEATs features into the M4 hidden space."""
+
+        raw = _ensure_batched_features(raw_features).to(
+            device=self.audio_projector.weight.device,
+            dtype=self.audio_projector.weight.dtype,
+        )
+        return self.audio_projector(raw)
 
 
 def _ensure_batched_windows(audio_windows: torch.Tensor) -> torch.Tensor:

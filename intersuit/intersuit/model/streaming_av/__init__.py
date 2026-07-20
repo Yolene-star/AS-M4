@@ -25,6 +25,11 @@ from .confidence_gate import (
     compute_audio_signal_features,
 )
 from .event_detector import AudioEventDetector, AudioEventDetectorOutput
+from .dynamic_window_selector import (
+    DynamicWindowSelector,
+    DynamicWindowSelectorOutput,
+    SelectorState,
+)
 from .fusion import GatedAVFusion
 from .temporal_aligner import CausalTemporalAligner, TemporalAlignerOutput
 
@@ -35,6 +40,9 @@ __all__ = [
     "AudioConfidenceGateOutput",
     "AudioEventDetector",
     "AudioEventDetectorOutput",
+    "DynamicWindowSelector",
+    "DynamicWindowSelectorOutput",
+    "SelectorState",
     "AudioEventFeatures",
     "FrozenOffsetScorerInputs",
     "FrozenOffsetScorerOutput",

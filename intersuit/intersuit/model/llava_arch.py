@@ -27,6 +27,7 @@ from .multimodal_projector.builder import build_vision_projector
 from .speech_encoder.builder import build_speech_encoder
 from .speech_projector.builder import  build_speech_projector
 from .scene_audio_encoder.builder import build_scene_audio_encoder
+from .scene_audio_encoder.scene_audio_encoder import SceneAudioEncoderOutput
 from .streaming_av.builder import build_streaming_av_module
 from .streaming_av.audio_event_aligner import FrozenOffsetScorerInputs, compute_audio_event_features
 from .streaming_av.confidence_gate import AudioSignalFeatures, compute_audio_signal_features
@@ -76,6 +77,11 @@ class LlavaMetaModel:
         # the existing speech/query-speech path.
         if hasattr(config, "scene_audio_encoder_type") or hasattr(config, "scene_audio_encoder"):
             self.scene_audio_encoder = build_scene_audio_encoder(config)
+            config.scene_audio_selector_dim = int(
+                getattr(self.scene_audio_encoder, "encoder_dim", None)
+                or getattr(config, "scene_audio_hidden_size", None)
+                or config.hidden_size
+            )
             self.streaming_av_module = build_streaming_av_module(config)
 
     def get_vision_tower(self):
@@ -220,6 +226,16 @@ class LlavaMetaModel:
         self.config.scene_audio_beats_checkpoint_sha256 = (
             getattr(model_args, "scene_audio_beats_checkpoint_sha256", None) or None
         )
+        self.config.scene_audio_window_mode = getattr(model_args, "scene_audio_window_mode", "fixed")
+        self.config.scene_audio_selector_dim = getattr(model_args, "scene_audio_selector_dim", None)
+        self.config.dynamic_window_scales_sec = getattr(model_args, "dynamic_window_scales_sec", "1.0,2.0,4.0")
+        self.config.dynamic_window_top_k = getattr(model_args, "dynamic_window_top_k", 16)
+        self.config.dynamic_window_nms_iou = getattr(model_args, "dynamic_window_nms_iou", 0.6)
+        self.config.dynamic_window_ema_beta = getattr(model_args, "dynamic_window_ema_beta", 0.9)
+        self.config.dynamic_window_start_scale = getattr(model_args, "dynamic_window_start_scale", 1.0)
+        self.config.dynamic_window_hold_scale = getattr(model_args, "dynamic_window_hold_scale", 0.25)
+        self.config.dynamic_window_min_score = getattr(model_args, "dynamic_window_min_score", 0.05)
+        self.config.dynamic_window_causal = getattr(model_args, "dynamic_window_causal", True)
         self.config.num_audio_events = getattr(model_args, "num_audio_events", 25)
         self.config.audio_quality_dim = getattr(model_args, "audio_quality_dim", 1)
         self.config.streaming_av_align_dim = getattr(model_args, "streaming_av_align_dim", self.config.hidden_size)
@@ -298,6 +314,9 @@ class LlavaMetaModel:
 
         if self.get_scene_audio_encoder() is None:
             scene_audio_encoder = build_scene_audio_encoder(self.config)
+            self.config.scene_audio_selector_dim = int(
+                getattr(scene_audio_encoder, "encoder_dim", self.config.scene_audio_selector_dim or self.config.hidden_size)
+            )
             streaming_av_module = build_streaming_av_module(self.config)
             if fsdp is not None and len(fsdp) > 0:
                 self.scene_audio_encoder = [scene_audio_encoder]
@@ -472,6 +491,44 @@ class LlavaMetaForCausalLM(ABC):
         scene_audio_encoder = self.get_scene_audio_encoder()
         if scene_audio_encoder is None:
             raise ValueError("Scene audio encoder is not initialized. Call initialize_scene_audio_modules first.")
+        window_mode = str(getattr(self.config, "scene_audio_window_mode", "fixed")).lower()
+        if window_mode not in {"fixed", "dynamic"}:
+            raise ValueError(f"encode_scene_audio does not support window mode: {window_mode}")
+        if window_mode == "dynamic":
+            streaming_av_module = self.get_streaming_av_module()
+            if streaming_av_module is None:
+                raise ValueError("Dynamic scene audio requires streaming_av_module")
+            if scene_audio_timestamps is None:
+                raise ValueError("Dynamic scene audio requires scene_audio_timestamps")
+            if hasattr(scene_audio_encoder, "encode_raw") and hasattr(scene_audio_encoder, "project"):
+                raw_output = scene_audio_encoder.encode_raw(scene_audios, sample_mask=scene_audio_mask)
+                selected = streaming_av_module.dynamic_window_selector(
+                    raw_output.features,
+                    scene_audio_timestamps,
+                    audio_mask=raw_output.mask,
+                    audio_windows=scene_audios,
+                )
+                projected = scene_audio_encoder.project(selected.selected_features)
+            else:
+                fixed_output = scene_audio_encoder(
+                    scene_audios,
+                    sample_mask=scene_audio_mask,
+                    timestamps=scene_audio_timestamps,
+                )
+                selected = streaming_av_module.dynamic_window_selector(
+                    fixed_output.features,
+                    scene_audio_timestamps,
+                    audio_mask=fixed_output.mask,
+                    audio_windows=scene_audios,
+                )
+                projected = selected.selected_features
+            self._last_dynamic_window_selector_output = selected
+            return SceneAudioEncoderOutput(
+                features=projected.masked_fill(~selected.selection_mask.unsqueeze(-1), 0.0),
+                mask=selected.selection_mask,
+                timestamps=selected.selected_timestamps,
+                feature_kind="dynamic_window_selected",
+            )
         output = scene_audio_encoder(
             scene_audios,
             sample_mask=scene_audio_mask,
@@ -546,6 +603,21 @@ class LlavaMetaForCausalLM(ABC):
                     device=feature.device,
                     dtype=feature.dtype,
                 )
+                signal_gate = None
+                if scene_audio_signal_features is not None:
+                    audio_rms = scene_audio_signal_features.rms[idx : idx + 1].to(
+                        device=feature.device,
+                        dtype=feature.dtype,
+                    )
+                    non_silent = audio_rms.gt(
+                        float(getattr(self.config, "audio_gate_silence_threshold", 1e-4))
+                    )
+                    signal_gate = _linearly_align_audio_windows(
+                        non_silent.to(dtype=feature.dtype).unsqueeze(-1),
+                        audio_mask,
+                        num_frames,
+                    ).squeeze(-1).clamp(0.0, 1.0)
+                    gate = gate * signal_gate
                 audio_delta = streaming_av_module.fusion.audio_delta(frame_audio)
                 raw_delta = (
                     float(audio_residual_scale)
@@ -567,6 +639,11 @@ class LlavaMetaForCausalLM(ABC):
                         "gate_mean": gate.detach().float().mean(),
                         "gate_max": gate.detach().float().max(),
                         "gate_min": gate.detach().float().min(),
+                        "signal_gate_mean": (
+                            signal_gate.detach().float().mean()
+                            if signal_gate is not None
+                            else None
+                        ),
                         "video_norm": cap_diagnostics["video_norm"][0],
                         "audio_norm": frame_audio.detach().float().norm(),
                         "delta_norm": cap_diagnostics["capped_delta_norm"][0],
@@ -627,9 +704,7 @@ class LlavaMetaForCausalLM(ABC):
             video_summary = video.mean(dim=2)
             local_alignment = None
             event_features = None
-            if bool(getattr(self.config, "enable_audio_event_aligner_v1", False)):
-                if scene_audio_windows is None:
-                    raise ValueError("scene_audio_windows are required when audio event aligner v1 is enabled")
+            if bool(getattr(self.config, "enable_audio_event_aligner_v1", False)) and scene_audio_windows is not None:
                 event_features = compute_audio_event_features(
                     scene_audio_windows[idx : idx + 1].to(device=feature.device),
                     audio_features=audio,
@@ -1191,7 +1266,8 @@ class LlavaMetaForCausalLM(ABC):
         **kwargs,
     ):
         enable_scene_audio = getattr(self.config, "enable_scene_audio", False)
-        if not enable_scene_audio or scene_audios is None:
+        window_mode = str(getattr(self.config, "scene_audio_window_mode", "fixed")).lower()
+        if not enable_scene_audio or window_mode == "disabled" or scene_audios is None:
             if speeches is not None:
                 return self.prepare_inputs_labels_for_multimodal_av(
                     input_ids,
@@ -1257,6 +1333,9 @@ class LlavaMetaForCausalLM(ABC):
             image_features = self.encode_multimodals(concat_images, video_idx_in_batch, split_sizes)
 
         enable_gate_v1 = bool(getattr(self.config, "enable_audio_confidence_gate_v1", False))
+        simple_residual = str(
+            getattr(self.config, "as_m4_fusion_mode", "aligned_gated")
+        ) == "beats_simple_residual"
         question_features = None
         scene_audio_signal_features = None
         if enable_gate_v1:
@@ -1265,6 +1344,7 @@ class LlavaMetaForCausalLM(ABC):
                 input_ids,
                 attention_mask,
             )
+        if enable_gate_v1 or simple_residual:
             scene_audio_signal_features = compute_audio_signal_features(
                 scene_audios,
                 sample_mask=scene_audio_mask,
@@ -1277,11 +1357,20 @@ class LlavaMetaForCausalLM(ABC):
             scene_audio_timestamps=scene_audio_timestamps,
         )
         self._last_scene_audio_output = scene_audio_output
+        if window_mode == "dynamic" and scene_audio_signal_features is not None:
+            selector_output = self._last_dynamic_window_selector_output
+            weights = selector_output.source_weights.to(device=scene_audio_signal_features.rms.device)
+            scene_audio_signal_features = AudioSignalFeatures(
+                rms=torch.einsum("bkt,bt->bk", weights, scene_audio_signal_features.rms),
+                loudness_dbfs=torch.einsum("bkt,bt->bk", weights, scene_audio_signal_features.loudness_dbfs),
+                silence_ratio=torch.einsum("bkt,bt->bk", weights, scene_audio_signal_features.silence_ratio),
+                norm=torch.einsum("bkt,bt->bk", weights, scene_audio_signal_features.norm),
+            )
         image_features = self.fuse_scene_audio_into_image_features(
             image_features,
             modalities,
             scene_audio_output,
-            scene_audio_timestamps=scene_audio_timestamps,
+            scene_audio_timestamps=scene_audio_output.timestamps,
             frame_timestamps=frame_timestamps,
             lookahead_sec=getattr(self.config, "streaming_av_lookahead_sec", 0.0),
             force_audio_gate=getattr(self.config, "force_audio_gate", None),
@@ -1291,15 +1380,34 @@ class LlavaMetaForCausalLM(ABC):
             scene_audio_signal_features=scene_audio_signal_features,
             scene_audio_windows=(
                 scene_audios
-                if bool(getattr(self.config, "enable_audio_event_aligner_v1", False))
+                if window_mode != "dynamic" and bool(getattr(self.config, "enable_audio_event_aligner_v1", False))
                 else None
             ),
             frozen_offset_scorer_inputs=getattr(
                 self,
                 "_audio_event_offset_diagnostic_inputs",
                 None,
-            ),
+            ) if window_mode != "dynamic" else None,
         )
+        if window_mode == "dynamic":
+            selector_output = self._last_dynamic_window_selector_output
+            selector_diagnostics = self._last_streaming_av_diagnostics
+            for idx, diagnostic in enumerate(selector_diagnostics):
+                if diagnostic is None or idx >= selector_output.selection_mask.shape[0]:
+                    continue
+                selected_mask = selector_output.selection_mask[idx]
+                diagnostic.update(
+                    {
+                        "dynamic_window_enabled": True,
+                        "dynamic_window_selected_ratio": selected_mask.float().mean(),
+                        "dynamic_window_selected_count": selected_mask.sum(),
+                        "dynamic_window_selection_scores": selector_output.selection_scores[idx].detach(),
+                        "dynamic_window_selection_mask": selected_mask.detach(),
+                        "dynamic_window_timestamps": selector_output.selected_timestamps[idx].detach(),
+                        "dynamic_window_micro_scores": selector_output.micro_scores[idx].detach(),
+                        "dynamic_window_thresholds": selector_output.dynamic_thresholds[idx].detach(),
+                    }
+                )
 
         mm_patch_merge_type = getattr(self.config, "mm_patch_merge_type", "flat")
         if mm_patch_merge_type == "flat":

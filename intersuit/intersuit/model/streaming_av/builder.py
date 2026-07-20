@@ -6,6 +6,7 @@ from torch import nn
 
 from .audio_event_aligner import LocalAudioEventAligner
 from .confidence_gate import AudioConfidenceGate
+from .dynamic_window_selector import DynamicWindowSelector
 from .event_detector import AudioEventDetector
 from .fusion import GatedAVFusion
 from .temporal_aligner import CausalTemporalAligner
@@ -26,6 +27,22 @@ class StreamingAVModule(nn.Module):
         silence_threshold = float(getattr(config, "audio_gate_silence_threshold", 1e-4))
         rms_reference = float(getattr(config, "audio_gate_rms_reference", 0.05))
         fusion_init = str(getattr(config, "as_m4_fusion_init", "zero"))
+        selector_dim = int(getattr(config, "scene_audio_selector_dim", hidden_size))
+        selector_scales = _parse_scales(getattr(config, "dynamic_window_scales_sec", "1.0,2.0,4.0"))
+
+        self.dynamic_window_selector = DynamicWindowSelector(
+            input_dim=selector_dim,
+            scales_sec=selector_scales,
+            top_k=int(getattr(config, "dynamic_window_top_k", 16)),
+            nms_iou=float(getattr(config, "dynamic_window_nms_iou", 0.6)),
+            ema_beta=float(getattr(config, "dynamic_window_ema_beta", 0.9)),
+            start_scale=float(getattr(config, "dynamic_window_start_scale", 1.0)),
+            hold_scale=float(getattr(config, "dynamic_window_hold_scale", 0.25)),
+            min_score=float(getattr(config, "dynamic_window_min_score", 0.05)),
+            rms_reference=float(getattr(config, "audio_gate_rms_reference", 0.05)),
+            silence_threshold=float(getattr(config, "audio_gate_silence_threshold", 1e-4)),
+            causal=bool(getattr(config, "dynamic_window_causal", True)),
+        )
 
         self.event_detector = AudioEventDetector(hidden_size, num_events)
         self.temporal_aligner = CausalTemporalAligner(
@@ -88,3 +105,13 @@ class StreamingAVModule(nn.Module):
 
 def build_streaming_av_module(config) -> StreamingAVModule:
     return StreamingAVModule(config)
+
+
+def _parse_scales(value) -> tuple[float, ...]:
+    if isinstance(value, str):
+        values = tuple(float(item.strip()) for item in value.split(",") if item.strip())
+    else:
+        values = tuple(float(item) for item in value)
+    if not values:
+        raise ValueError("dynamic_window_scales_sec must not be empty")
+    return values
