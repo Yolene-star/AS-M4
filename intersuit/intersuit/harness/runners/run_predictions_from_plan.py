@@ -155,7 +155,11 @@ def _find_token_subsequence(sequence: torch.Tensor, subsequence: torch.Tensor) -
     return None, None
 
 
-def prediction_correct(prediction: str, qa: dict[str, Any]) -> bool:
+def prediction_correct(
+    prediction: str,
+    qa: dict[str, Any],
+    scorer: str = "exact_match",
+) -> bool:
     normalized_prediction = normalize_text(prediction)
     choices = qa.get("choices")
     if isinstance(choices, dict) and re.fullmatch(r"[a-d]", normalized_prediction):
@@ -176,6 +180,23 @@ def prediction_correct(prediction: str, qa: dict[str, Any]) -> bool:
         regex_match = any(re.search(str(pattern), prediction or "", flags=re.IGNORECASE) for pattern in patterns)
     if contains or patterns:
         return contains_match or regex_match
+    if scorer == "label_terms":
+        answer = str(qa["answer"] or "").strip()
+        if re.fullmatch(r"[A-Da-d]", answer):
+            return normalized_prediction == answer.lower()
+        terms = []
+        for item in answer.split(","):
+            term = re.sub(r"\s*\([^)]*\)\s*", " ", item).strip()
+            if term:
+                terms.append(term)
+        return any(
+            re.search(
+                rf"(?<!\w){re.escape(term)}(?!\w)",
+                prediction or "",
+                flags=re.IGNORECASE,
+            )
+            for term in terms
+        )
     return normalized_prediction == normalize_text(qa["answer"])
 
 
@@ -865,7 +886,11 @@ def run_predictions(
                 )
             else:
                 raise ValueError(f"Unknown backend: {backend}")
-            correct = prediction_correct(prediction, qa)
+            correct = prediction_correct(
+                prediction,
+                qa,
+                scorer=str(exp.get("scorer") or "exact_match"),
+            )
             row = {
                 "id": qa["id"],
                 "sample_id": qa["sample_id"],

@@ -191,3 +191,11 @@ def test_launcher_gate_only_accepts_matching_audit(tmp_path):
     )
     assert proc.returncode == 0, proc.stderr
     assert "仅检查，不启动训练" in proc.stdout
+
+
+def test_beats_launcher_uses_validated_conservative_gate_default():
+    script = Path(__file__).resolve().parents[1] / "scripts" / "run_as_m4_beats_stage.sh"
+
+    content = script.read_text(encoding="utf-8")
+
+    assert 'AS_M4_SIMPLE_AUDIO_GATE="${AS_M4_SIMPLE_AUDIO_GATE:-0.25}"' in content

@@ -425,6 +425,29 @@ def test_beats_simple_residual_gate_zero_is_exact_rollback():
     assert diagnostics["delta_to_video_ratio"].item() == 0.0
 
 
+def test_beats_simple_residual_silent_waveform_is_exact_rollback():
+    model = DummyStreamingModel(fusion_init="identity")
+    model.config.as_m4_fusion_mode = "beats_simple_residual"
+    model.config.as_m4_simple_audio_gate = 1.0
+    model.config.audio_gate_silence_threshold = 1e-4
+    video = torch.randn(3, 2, 4)
+
+    fused = model.fuse_scene_audio_into_image_features(
+        [video],
+        ["video"],
+        _scene_output(),
+        scene_audio_signal_features=compute_audio_signal_features(
+            torch.zeros(1, 2, 160)
+        ),
+    )[0]
+
+    assert torch.equal(fused, video)
+    diagnostics = model._last_streaming_av_diagnostics[0]
+    assert diagnostics["signal_gate_mean"].item() == 0.0
+    assert diagnostics["gate_mean"].item() == 0.0
+    assert diagnostics["delta_to_video_ratio"].item() == 0.0
+
+
 @preserve_torch_rng
 def test_gate_v1_integration_emits_signal_question_and_offset_diagnostics():
     model = DummyStreamingModel(fusion_init="identity", gate_v1=True)

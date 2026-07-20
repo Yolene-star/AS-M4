@@ -103,6 +103,34 @@ def test_prediction_correct_supports_contains_and_regex():
     assert not runner.prediction_correct("three people", contains_qa)
 
 
+def test_prediction_correct_label_terms_uses_phrase_boundaries():
+    assert runner.prediction_correct(
+        "The video shows a bus on the road.",
+        {"answer": "Bus"},
+        scorer="label_terms",
+    )
+    assert runner.prediction_correct(
+        "Frying",
+        {"answer": "Frying (food)"},
+        scorer="label_terms",
+    )
+    assert runner.prediction_correct(
+        "A man speaking can be heard.",
+        {"answer": "Male speech, man speaking"},
+        scorer="label_terms",
+    )
+    assert not runner.prediction_correct(
+        "Business district",
+        {"answer": "Bus"},
+        scorer="label_terms",
+    )
+    assert not runner.prediction_correct(
+        "A detailed answer",
+        {"answer": "A"},
+        scorer="label_terms",
+    )
+
+
 def test_jsonable_diagnostics_converts_tensors():
     value = [{"gate_mean": runner.torch.tensor(0.5), "gate": runner.torch.tensor([[0.25, 0.75]])}, None]
 
