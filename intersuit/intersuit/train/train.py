@@ -182,7 +182,7 @@ class DataArguments:
     scene_audio_folder: Optional[str] = field(default=None)
     scene_audio_feature_folder: Optional[str] = field(default=None)
     video_feature_folder: Optional[str] = field(default=None)
-    scene_audio_sample_rate: int = field(default=16000)
+    scene_audio_data_sample_rate: int = field(default=16000)
     scene_audio_from_video: bool = field(default=False)
     
     is_mop: bool = False
@@ -1498,7 +1498,10 @@ class LazySupervisedDataset(Dataset):
             scene_audio, generated_timestamps = _load_scene_audio_media(
                 sample["scene_audio_path"],
                 folder=self.data_args.scene_audio_folder,
-                sample_rate=int(sample.get("scene_audio_sample_rate") or self.data_args.scene_audio_sample_rate),
+                sample_rate=int(
+                    sample.get("scene_audio_sample_rate")
+                    or self.data_args.scene_audio_data_sample_rate
+                ),
                 window_sec=float(sample.get("scene_audio_window_sec") or 1.0),
                 hop_sec=float(sample.get("scene_audio_hop_sec") or 0.5),
             )

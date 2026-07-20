@@ -15,7 +15,12 @@ trainer_stub.__spec__ = importlib.machinery.ModuleSpec("intersuit.train.llava_tr
 trainer_stub.LLaVATrainer = object
 sys.modules.setdefault("intersuit.train.llava_trainer", trainer_stub)
 import intersuit.train.train as train_module
-from intersuit.train.train import DataCollatorForSupervisedDataset
+from intersuit.train.train import (
+    DataArguments,
+    DataCollatorForSupervisedDataset,
+    ModelArguments,
+    TrainingArguments,
+)
 
 
 class DummyTokenizer:
@@ -96,7 +101,7 @@ def test_scene_audio_path_uses_media_windows_and_timestamps(monkeypatch):
     dataset.data_args = types.SimpleNamespace(
         scene_audio_folder="audio",
         scene_audio_feature_folder=None,
-        scene_audio_sample_rate=16000,
+        scene_audio_data_sample_rate=16000,
     )
 
     result = dataset._load_scene_audio_fields(
@@ -110,6 +115,19 @@ def test_scene_audio_path_uses_media_windows_and_timestamps(monkeypatch):
 
     assert torch.equal(result["scene_audio"], expected_audio)
     assert torch.equal(result["scene_audio_timestamps"], expected_timestamps)
+
+
+def test_training_argument_parser_has_unique_scene_audio_options():
+    parser = train_module.transformers.HfArgumentParser(
+        (ModelArguments, DataArguments, TrainingArguments)
+    )
+    option_strings = {
+        option
+        for action in parser._actions
+        for option in action.option_strings
+    }
+    assert "--scene_audio_sample_rate" in option_strings
+    assert "--scene_audio_data_sample_rate" in option_strings
 
 
 if __name__ == "__main__":

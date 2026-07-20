@@ -166,6 +166,7 @@ ACCELERATE_CPU_AFFINITY=1 "$TORCHRUN" --nproc_per_node="${NUM_GPUS}" --master_po
     --scene_audio_encoder_type "${AS_M4_SCENE_AUDIO_ENCODER_TYPE:-dummy}" \
     --scene_audio_torchaudio_bundle "${AS_M4_SCENE_AUDIO_TORCHAUDIO_BUNDLE:-WAV2VEC2_BASE}" \
     --scene_audio_sample_rate "${AS_M4_SCENE_AUDIO_SAMPLE_RATE:-16000}" \
+    --scene_audio_data_sample_rate "${AS_M4_SCENE_AUDIO_SAMPLE_RATE:-16000}" \
     --scene_audio_beats_checkpoint "${AS_M4_SCENE_AUDIO_BEATS_CHECKPOINT:-intersuit/checkpoints/BEATs_iter3_plus_AS2M.pt}" \
     --scene_audio_beats_code_root "${AS_M4_SCENE_AUDIO_BEATS_CODE_ROOT:-third_party/OmniMMI/baselines/videollama2/model}" \
     --scene_audio_beats_checkpoint_sha256 "${AS_M4_SCENE_AUDIO_BEATS_CHECKPOINT_SHA256:-}" \

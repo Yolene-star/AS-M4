@@ -107,7 +107,7 @@ def runtime_smoke(train_manifest: Path, rows: list[dict[str, Any]]) -> dict[str,
         dataset_paths=[],
         scene_audio_folder=None,
         scene_audio_feature_folder=None,
-        scene_audio_sample_rate=16000,
+        scene_audio_data_sample_rate=16000,
     )
     tokenizer = DummyTokenizer()
     dataset = LazySupervisedDataset(str(train_manifest), tokenizer, data_args)
