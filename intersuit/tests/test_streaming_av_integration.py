@@ -99,6 +99,15 @@ def test_enabled_frozen_offset_scorer_requires_bundle_path():
         build_streaming_av_module(config)
 
 
+def test_optional_audio_event_align_dim_falls_back_to_streaming_dim():
+    config = DummyConfig()
+    config.audio_event_align_dim = None
+
+    module = build_streaming_av_module(config)
+
+    assert module.audio_event_aligner.align_dim == config.streaming_av_align_dim
+
+
 def test_streaming_av_fusion_changes_video_features_when_gate_enabled():
     model = DummyStreamingModel(fusion_init="identity")
     video = torch.zeros(2, 3, 4)

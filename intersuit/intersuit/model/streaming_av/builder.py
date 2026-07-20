@@ -43,7 +43,7 @@ class StreamingAVModule(nn.Module):
             )
         self.audio_event_aligner = LocalAudioEventAligner(
             hidden_size=hidden_size,
-            align_dim=int(getattr(config, "audio_event_align_dim", align_dim)),
+            align_dim=int(getattr(config, "audio_event_align_dim", None) or align_dim),
             candidate_offsets=(-local_offset_sec, 0.0, local_offset_sec),
             event_strength_weight=float(getattr(config, "audio_event_strength_weight", 0.05)),
             semantic_feature_mode=str(getattr(config, "audio_event_semantic_feature_mode", "disabled")),
