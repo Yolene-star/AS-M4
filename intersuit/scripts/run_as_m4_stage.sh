@@ -182,6 +182,7 @@ fi
 if [[ "${RUN_PREFLIGHT:-1}" == "1" ]]; then
   python scripts/check_m4_repro_preflight.py \
     --allowed_power_limits "${ALLOWED_POWER_LIMITS:-300.00 W,450.00 W}" \
+    --audit_json "${PREFLIGHT_AUDIT_JSON:-train_logs/m4_data_audit_generated_audio.json}" \
     --expected_nccl_socket_ifname "$NCCL_SOCKET_IFNAME"
 fi
 
