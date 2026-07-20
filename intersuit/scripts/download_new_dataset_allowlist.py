@@ -11,6 +11,14 @@ from urllib.parse import urlparse
 from new_dataset_common import load_json, sha256_file, write_json
 
 
+def _music_filename(entry: dict) -> str:
+    video_id = str(entry["video_id"])
+    suffix = str(entry.get("suffix") or "")
+    if suffix and not video_id.endswith(suffix):
+        video_id += suffix
+    return f"{video_id}.mp4"
+
+
 def _download(url: str, target: Path, *, expected_bytes: int | None, timeout: int, retries: int) -> tuple[str, int, str]:
     part = target.with_suffix(target.suffix + ".part")
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -99,7 +107,7 @@ def main() -> None:
         else:
             url = entry.get("source_url", "")
             expected = None
-            filename = f"{entry['video_id']}{entry.get('suffix','')}.mp4"
+            filename = _music_filename(entry)
         if not url or urlparse(url).scheme not in {"http", "https"}:
             return None, {"candidate_id": entry.get("candidate_id"), "reason": "invalid URL"}
         target = args.output_root / source.replace("/", "_") / filename
@@ -131,19 +139,21 @@ def main() -> None:
         if reserve.get("artifact_kind") != "download_preflight_reserve_not_training_manifest":
             raise SystemExit("拒绝：reserve 不是冻结替补清单")
         reserve_entries = reserve.get("entries", [])
+        music_failures = [failure for failure in unresolved if failure.get("source_dataset") == "MUSIC-AVQA-v2.0"]
+        unresolved = [failure for failure in unresolved if failure.get("source_dataset") != "MUSIC-AVQA-v2.0"]
         for entry in reserve_entries:
-            if not unresolved:
+            if not music_failures:
                 break
             if entry.get("source_dataset") != "MUSIC-AVQA-v2.0":
                 continue
             result, failure = process(entry)
             if result:
-                original = unresolved.pop(0)
+                original = music_failures.pop(0)
                 original["resolved_by"] = result.get("candidate_id")
                 results.append(dict(result, replacement_for=original.get("candidate_id")))
             elif failure:
-                unresolved.append(failure)
                 failure_records.append(failure)
+        unresolved.extend(music_failures)
     status_path = args.status_output or args.output_root / "download_status.json"
     failures_path = args.failures_output or args.output_root / "download_failures.json"
     write_json(status_path, {"status": "PASS" if not unresolved else "FAIL", "count": len(results), "entries": results})

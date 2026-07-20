@@ -10,7 +10,7 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 import sys
 sys.path.insert(0, str(SCRIPTS))
 
-from download_new_dataset_allowlist import _download
+from download_new_dataset_allowlist import _download, _music_filename
 from new_dataset_common import replace_music_template, sha256_file, task_type_from_music
 from validate_new_dataset_media import validate_entry
 from validate_training_data_leakage import audit_manifest
@@ -61,6 +61,12 @@ def test_download_is_idempotent_and_rejects_wrong_sha(tmp_path, monkeypatch):
     assert "-C" in calls[0] and "-" in calls[0]
     assert _download("https://example.test/a", target, expected_bytes=5, timeout=1, retries=0)[0] == "skipped"
     assert len(calls) == 1
+
+
+def test_music_filename_applies_suffix_exactly_once():
+    assert _music_filename({"video_id": "base", "suffix": ""}) == "base.mp4"
+    assert _music_filename({"video_id": "base_#02", "suffix": "_#02"}) == "base_#02.mp4"
+    assert _music_filename({"video_id": "base", "suffix": "_#02"}) == "base_#02.mp4"
 
 
 def test_non_allowlist_artifact_rejected(tmp_path):
