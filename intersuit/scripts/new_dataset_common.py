@@ -108,14 +108,23 @@ def audio_probe(path: Path) -> dict[str, Any]:
 
 def extract_wav(media: Path, wav: Path) -> dict[str, Any]:
     wav.parent.mkdir(parents=True, exist_ok=True)
-    command = [
-        "ffmpeg", "-nostdin", "-y", "-v", "error", "-i", str(media),
-        "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav),
-    ]
-    proc = subprocess.run(command, capture_output=True, text=True, check=False)
-    if proc.returncode or not wav.is_file() or wav.stat().st_size == 0:
-        raise ValueError(f"audio extraction failed: {proc.stderr.strip()[:300]}")
-    meta = audio_probe(wav)
+    meta = None
+    if wav.is_file() and wav.stat().st_size:
+        try:
+            existing = audio_probe(wav)
+            if int(existing.get("sample_rate") or 0) == 16000 and int(existing.get("channels") or 0) == 1:
+                meta = existing
+        except ValueError:
+            pass
+    if meta is None:
+        command = [
+            "ffmpeg", "-nostdin", "-y", "-v", "error", "-i", str(media),
+            "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav),
+        ]
+        proc = subprocess.run(command, capture_output=True, text=True, check=False)
+        if proc.returncode or not wav.is_file() or wav.stat().st_size == 0:
+            raise ValueError(f"audio extraction failed: {proc.stderr.strip()[:300]}")
+        meta = audio_probe(wav)
     if int(meta.get("sample_rate") or 0) != 16000 or int(meta.get("channels") or 0) != 1:
         raise ValueError("extracted audio is not 16 kHz mono")
     return {

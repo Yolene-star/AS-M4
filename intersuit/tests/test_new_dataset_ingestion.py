@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, str(SCRIPTS))
 
 from download_new_dataset_allowlist import _download, _music_filename
-from new_dataset_common import replace_music_template, sha256_file, task_type_from_music
+from new_dataset_common import extract_wav, replace_music_template, sha256_file, task_type_from_music
 from validate_new_dataset_media import validate_entry
 from validate_training_data_leakage import audit_manifest
 
@@ -67,6 +67,24 @@ def test_music_filename_applies_suffix_exactly_once():
     assert _music_filename({"video_id": "base", "suffix": ""}) == "base.mp4"
     assert _music_filename({"video_id": "base_#02", "suffix": "_#02"}) == "base_#02.mp4"
     assert _music_filename({"video_id": "base", "suffix": "_#02"}) == "base_#02.mp4"
+
+
+def test_extract_wav_reuses_valid_16k_mono_file(tmp_path, monkeypatch):
+    media = make_media(tmp_path)
+    wav = tmp_path / "audio.wav"
+    first = extract_wav(media, wav)
+    original_run = subprocess.run
+    ffmpeg_calls = []
+
+    def tracked_run(command, **kwargs):
+        if command[0] == "ffmpeg":
+            ffmpeg_calls.append(command)
+        return original_run(command, **kwargs)
+
+    monkeypatch.setattr("new_dataset_common.subprocess.run", tracked_run)
+    second = extract_wav(media, wav)
+    assert second["audio_sha256"] == first["audio_sha256"]
+    assert ffmpeg_calls == []
 
 
 def test_non_allowlist_artifact_rejected(tmp_path):
