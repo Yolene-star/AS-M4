@@ -214,6 +214,8 @@ def build_plan(config: MatrixConfig) -> list[dict[str, Any]]:
             "AS_M4_FUSION_INIT": str(exp.get("fusion_init") or "zero"),
             "AS_M4_GATE_LOGIT_BIAS": str(exp.get("gate_logit_bias") if exp.get("gate_logit_bias") is not None else -5.0),
         }
+        for key, value in (exp.get("env") or {}).items():
+            env.setdefault(str(key), str(value))
         if exp.get("force_audio_gate") is not None:
             env["AS_M4_FORCE_AUDIO_GATE"] = str(exp["force_audio_gate"])
         records.append(

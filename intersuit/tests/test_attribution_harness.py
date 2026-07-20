@@ -73,3 +73,18 @@ def test_write_outputs_creates_plan_and_summary(tmp_path):
     assert len(rows) == 8
     assert summary["status"] == "pass"
     assert summary["experiment_ids"] == list(runner.REQUIRED_IDS)
+
+
+def test_build_plan_preserves_additional_experiment_environment(tmp_path):
+    data = _base_config(tmp_path)
+    experiments = [dict(item) for item in runner.DEFAULT_EXPERIMENTS]
+    experiments[2]["env"] = {
+        "AS_M4_DEBUG_AUDIO_CONDITION": "silence",
+        "AS_M4_ENABLE_SCENE_AUDIO": "0",
+    }
+    data["experiments"] = experiments
+
+    plan = runner.build_plan(runner.parse_config(data))
+
+    assert plan[2]["env"]["AS_M4_DEBUG_AUDIO_CONDITION"] == "silence"
+    assert plan[2]["env"]["AS_M4_ENABLE_SCENE_AUDIO"] == "1"
