@@ -1,5 +1,302 @@
 {
-  "count": 0,
-  "entries": [],
-  "status": "PASS"
+  "count": 7,
+  "entries": [
+    {
+      "candidate_id": "music_avqa_v2:36asbfrlHZc",
+      "derived_video_ids": [
+        "36asbfrlHZc"
+      ],
+      "duration": "1:00",
+      "duration_seconds": 60.0,
+      "elapsed_sec": 3.307,
+      "error": "Deprecated Feature: Support for Python version 3.9 has been deprecated. Please update to Python 3.10 or above\nERROR: [youtube] 36asbfrlHZc: Video unavailable",
+      "exclusion_checks": {
+        "media_sha256": null,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": null,
+      "expected_sha256": null,
+      "has_flip": false,
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/36asbfrlHZc.mp4",
+      "qa_count": 8,
+      "resolved_by": "music_avqa_v2:Jq0r7FQXx3Q",
+      "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/36asbfrlHZc.mp4",
+      "source_dataset": "MUSIC-AVQA-v2.0",
+      "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+      "source_url": "https://www.youtube.com/watch?v=36asbfrlHZc",
+      "start_seconds": 0.0,
+      "start_time": "0:00",
+      "status": "failed",
+      "suffix": "",
+      "task_distribution": {
+        "audio": 3,
+        "audio_visual": 3,
+        "visual": 2
+      },
+      "task_subtypes": {
+        "audio:counting": 3,
+        "audio_visual:counting": 3,
+        "visual:counting": 2
+      },
+      "video_id": "36asbfrlHZc",
+      "video_path": "datasets/MUSIC_AVQA_V2/videos/36asbfrlHZc.mp4",
+      "youtube_id": "36asbfrlHZc"
+    },
+    {
+      "candidate_id": "music_avqa_v2:j3k08NMF2FI",
+      "derived_video_ids": [
+        "j3k08NMF2FI",
+        "j3k08NMF2FI_flip"
+      ],
+      "duration": "1:00",
+      "duration_seconds": 60.0,
+      "elapsed_sec": 3.792,
+      "error": "upport for Python version 3.9 has been deprecated. Please update to Python 3.10 or above\nERROR: [youtube] j3k08NMF2FI: Private video. Sign in if you've been granted access to this video. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies",
+      "exclusion_checks": {
+        "media_sha256": null,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": null,
+      "expected_sha256": null,
+      "has_flip": true,
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/j3k08NMF2FI.mp4",
+      "qa_count": 5,
+      "resolved_by": "music_avqa_v2:8ldTzGP06nc",
+      "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/j3k08NMF2FI.mp4",
+      "source_dataset": "MUSIC-AVQA-v2.0",
+      "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+      "source_url": "https://www.youtube.com/watch?v=j3k08NMF2FI",
+      "start_seconds": 0.0,
+      "start_time": "0:00",
+      "status": "failed",
+      "suffix": "",
+      "task_distribution": {
+        "audio": 1,
+        "audio_visual": 3,
+        "visual": 1
+      },
+      "task_subtypes": {
+        "audio:counting": 1,
+        "audio_visual:temporal": 3,
+        "visual:counting": 1
+      },
+      "video_id": "j3k08NMF2FI",
+      "video_path": "datasets/MUSIC_AVQA_V2/videos/j3k08NMF2FI.mp4",
+      "youtube_id": "j3k08NMF2FI"
+    },
+    {
+      "candidate_id": "music_avqa_v2:ccIGDco3U3g",
+      "derived_video_ids": [
+        "ccIGDco3U3g"
+      ],
+      "duration": "1:00",
+      "duration_seconds": 60.0,
+      "elapsed_sec": 3.236,
+      "error": "upport for Python version 3.9 has been deprecated. Please update to Python 3.10 or above\nERROR: [youtube] ccIGDco3U3g: Private video. Sign in if you've been granted access to this video. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies",
+      "exclusion_checks": {
+        "media_sha256": null,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": null,
+      "expected_sha256": null,
+      "has_flip": false,
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/ccIGDco3U3g.mp4",
+      "qa_count": 7,
+      "resolved_by": "music_avqa_v2:ax9lKnqJcbE",
+      "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/ccIGDco3U3g.mp4",
+      "source_dataset": "MUSIC-AVQA-v2.0",
+      "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+      "source_url": "https://www.youtube.com/watch?v=ccIGDco3U3g",
+      "start_seconds": 0.0,
+      "start_time": "0:00",
+      "status": "failed",
+      "suffix": "",
+      "task_distribution": {
+        "audio": 2,
+        "audio_visual": 4,
+        "visual": 1
+      },
+      "task_subtypes": {
+        "audio:counting": 2,
+        "audio_visual:counting": 4,
+        "visual:counting": 1
+      },
+      "video_id": "ccIGDco3U3g",
+      "video_path": "datasets/MUSIC_AVQA_V2/videos/ccIGDco3U3g.mp4",
+      "youtube_id": "ccIGDco3U3g"
+    },
+    {
+      "candidate_id": "music_avqa_v2:swyAOqdEgew",
+      "derived_video_ids": [
+        "swyAOqdEgew"
+      ],
+      "duration": "1:00",
+      "duration_seconds": 60.0,
+      "elapsed_sec": 3.039,
+      "error": "upport for Python version 3.9 has been deprecated. Please update to Python 3.10 or above\nERROR: [youtube] swyAOqdEgew: Private video. Sign in if you've been granted access to this video. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies",
+      "exclusion_checks": {
+        "media_sha256": null,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": null,
+      "expected_sha256": null,
+      "has_flip": false,
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/swyAOqdEgew.mp4",
+      "qa_count": 7,
+      "resolved_by": "music_avqa_v2:NEBnHuOeFVw",
+      "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/swyAOqdEgew.mp4",
+      "source_dataset": "MUSIC-AVQA-v2.0",
+      "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+      "source_url": "https://www.youtube.com/watch?v=swyAOqdEgew",
+      "start_seconds": 8.0,
+      "start_time": "0:08",
+      "status": "failed",
+      "suffix": "",
+      "task_distribution": {
+        "audio": 2,
+        "audio_visual": 3,
+        "visual": 2
+      },
+      "task_subtypes": {
+        "audio:counting": 2,
+        "audio_visual:counting": 3,
+        "visual:counting": 2
+      },
+      "video_id": "swyAOqdEgew",
+      "video_path": "datasets/MUSIC_AVQA_V2/videos/swyAOqdEgew.mp4",
+      "youtube_id": "swyAOqdEgew"
+    },
+    {
+      "candidate_id": "music_avqa_v2:7Xs_4uDgO_Y",
+      "derived_video_ids": [
+        "7Xs_4uDgO_Y"
+      ],
+      "duration": "1:00",
+      "duration_seconds": 60.0,
+      "elapsed_sec": 3.128,
+      "error": "Deprecated Feature: Support for Python version 3.9 has been deprecated. Please update to Python 3.10 or above\nERROR: [youtube] 7Xs_4uDgO_Y: Video unavailable",
+      "exclusion_checks": {
+        "media_sha256": null,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": null,
+      "expected_sha256": null,
+      "has_flip": false,
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/7Xs_4uDgO_Y.mp4",
+      "qa_count": 8,
+      "resolved_by": "music_avqa_v2:ZMPgSg4u_x4",
+      "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/7Xs_4uDgO_Y.mp4",
+      "source_dataset": "MUSIC-AVQA-v2.0",
+      "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+      "source_url": "https://www.youtube.com/watch?v=7Xs_4uDgO_Y",
+      "start_seconds": 0.0,
+      "start_time": "0:00",
+      "status": "failed",
+      "suffix": "",
+      "task_distribution": {
+        "audio": 2,
+        "audio_visual": 4,
+        "visual": 2
+      },
+      "task_subtypes": {
+        "audio:counting": 2,
+        "audio_visual:counting": 4,
+        "visual:counting": 2
+      },
+      "video_id": "7Xs_4uDgO_Y",
+      "video_path": "datasets/MUSIC_AVQA_V2/videos/7Xs_4uDgO_Y.mp4",
+      "youtube_id": "7Xs_4uDgO_Y"
+    },
+    {
+      "candidate_id": "music_avqa_v2:SSAhqgki_vk",
+      "derived_video_ids": [
+        "SSAhqgki_vk"
+      ],
+      "duration": "1:00",
+      "duration_seconds": 60.0,
+      "elapsed_sec": 3.3,
+      "error": "Deprecated Feature: Support for Python version 3.9 has been deprecated. Please update to Python 3.10 or above\nERROR: [youtube] SSAhqgki_vk: Video unavailable. This video is no longer available because the YouTube account associated with this video has been terminated.",
+      "exclusion_checks": {
+        "media_sha256": null,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": null,
+      "expected_sha256": null,
+      "has_flip": false,
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/SSAhqgki_vk.mp4",
+      "qa_count": 7,
+      "resolved_by": "music_avqa_v2:jEdK7OArIGM",
+      "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/SSAhqgki_vk.mp4",
+      "source_dataset": "MUSIC-AVQA-v2.0",
+      "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+      "source_url": "https://www.youtube.com/watch?v=SSAhqgki_vk",
+      "start_seconds": 120.0,
+      "start_time": "2:00",
+      "status": "failed",
+      "suffix": "",
+      "task_distribution": {
+        "audio": 3,
+        "audio_visual": 3,
+        "visual": 1
+      },
+      "task_subtypes": {
+        "audio:counting": 3,
+        "audio_visual:counting": 3,
+        "visual:counting": 1
+      },
+      "video_id": "SSAhqgki_vk",
+      "video_path": "datasets/MUSIC_AVQA_V2/videos/SSAhqgki_vk.mp4",
+      "youtube_id": "SSAhqgki_vk"
+    },
+    {
+      "candidate_id": "music_avqa_v2:MbG6CQRz-hk",
+      "derived_video_ids": [
+        "MbG6CQRz-hk",
+        "MbG6CQRz-hk_flip"
+      ],
+      "duration": "1:00",
+      "duration_seconds": 60.0,
+      "elapsed_sec": 3.257,
+      "error": "upport for Python version 3.9 has been deprecated. Please update to Python 3.10 or above\nERROR: [youtube] MbG6CQRz-hk: Private video. Sign in if you've been granted access to this video. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies",
+      "exclusion_checks": {
+        "media_sha256": null,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": null,
+      "expected_sha256": null,
+      "has_flip": true,
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/MbG6CQRz-hk.mp4",
+      "qa_count": 6,
+      "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/MbG6CQRz-hk.mp4",
+      "source_dataset": "MUSIC-AVQA-v2.0",
+      "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+      "source_url": "https://www.youtube.com/watch?v=MbG6CQRz-hk",
+      "start_seconds": 0.0,
+      "start_time": "0:00",
+      "status": "failed",
+      "suffix": "",
+      "task_distribution": {
+        "audio": 1,
+        "audio_visual": 4,
+        "visual": 1
+      },
+      "task_subtypes": {
+        "audio:counting": 1,
+        "audio_visual:temporal": 4,
+        "visual:counting": 1
+      },
+      "video_id": "MbG6CQRz-hk",
+      "video_path": "datasets/MUSIC_AVQA_V2/videos/MbG6CQRz-hk.mp4",
+      "youtube_id": "MbG6CQRz-hk"
+    }
+  ],
+  "status": "PASS",
+  "unresolved_count": 0
 }

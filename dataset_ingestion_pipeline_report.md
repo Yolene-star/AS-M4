@@ -76,3 +76,37 @@ PYTHONPATH=intersuit/scripts python intersuit/scripts/convert_new_dataset_traini
 ```
 
 只有验证和字段转换均 PASS，且重新生成泄漏审计 PASS 后，才可人工确认并构建正式 train/dev manifest。当前阶段不自动移动媒体、不启动训练。
+
+## 阶段 1 全量结果
+
+2026-07-20 已完成主名单、确定性替补、全量隔离验证、WAV 提取和泄漏门禁。
+本阶段没有移动媒体到正式训练目录，没有生成正式 train/dev manifest，也没有启动训练。
+
+- 下载状态：550 条，AVUT 430 条、MUSIC 120 条，未解决下载失败为 0。
+- MUSIC 替补：6 条主名单失败由冻结替补顺序补齐；suffix 重复拼接修复提交为 `12fae0d`。
+- 原始隔离验证：550 条中 544 条 accepted，6 条 AVUT 因冻结/历史排除 ID 碰撞被拒绝。
+- 无效条目只记录在 `invalid_new_media.json`，未进入 WAV、候选字段或泄漏门禁。
+- 有效基础媒体：544 个；计入 24 个 MUSIC flip 后，有效物理媒体为 568 个。
+- 视频与音轨完整解码：568/568。
+- 16 kHz 单声道 WAV：568/568；幂等提取修复提交为 `ec684be`。
+- 候选字段：1832 条，`sample_id` 全部唯一。
+- 冻结集、历史集和 dev/test 的 video ID、YouTube ID、媒体 SHA256 重叠均为 0。
+- 新增物理媒体内部 SHA256 重复和派生 ID 重复均为 0。
+- 最终阶段门禁：`PASS`。
+
+权威报告位于：
+
+```text
+intersuit/datasets/NEW_AV_TRAIN/quarantine/download_status.json
+intersuit/datasets/NEW_AV_TRAIN/quarantine/download_failures.json
+intersuit/datasets/NEW_AV_TRAIN/quarantine/quarantine_validation_report.json
+intersuit/datasets/NEW_AV_TRAIN/quarantine/leakage_gate_report.json
+intersuit/datasets/NEW_AV_TRAIN/quarantine/valid_new_media.json
+intersuit/datasets/NEW_AV_TRAIN/quarantine/invalid_new_media.json
+intersuit/datasets/NEW_AV_TRAIN/quarantine/physical_media_audit_report.json
+intersuit/datasets/NEW_AV_TRAIN/quarantine/stage1_gate_report.json
+```
+
+其中 `quarantine_validation_report.json` 保留原始 550 条全量验证事实，因此状态为
+`FAIL` 并列出 6 条排除集碰撞；最终有效集门禁由 `stage1_gate_report.json` 汇总，
+其状态为 `PASS`。这样既不会隐藏无效媒体，也不会把已隔离的碰撞条目计入有效集。
