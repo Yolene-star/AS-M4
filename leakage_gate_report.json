@@ -1,0 +1,14 @@
+{
+  "candidate_count": 23,
+  "candidate_set_sha256": "ffae7e7b618c3ae0ee5733b6f30cb24eccde0f0364a42501d44a1f94ae9a6282",
+  "error_count": 0,
+  "error_counts": {},
+  "errors": [],
+  "exclusion_set_sha256": "1c20401a2ac285ebb01b01874790ed2ff6f8fcec9c2ec2b82ff3d72a11050988",
+  "manifest_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/smoke_manifest.json",
+  "manifest_sha256": "9a7caaac9f069d79b6ce9e96204567a3946e8e5630611245a56c75cb8dfb9bf3",
+  "media_sha256_overlap_count": 0,
+  "status": "PASS",
+  "video_id_overlap_count": 0,
+  "youtube_id_overlap_count": 0
+}

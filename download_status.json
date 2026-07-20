@@ -1,0 +1,178 @@
+{
+  "count": 5,
+  "entries": [
+    {
+      "candidate_id": "avut:EA6h4omEXwg",
+      "download_url": "https://huggingface.co/datasets/tsinghua-ee/AVUTBenchmark/resolve/558ca95ac16c972a4de2028fbecef2a8b82fdb00/EA6h4omEXwg.mp4",
+      "elapsed_sec": 0.0,
+      "exclusion_checks": {
+        "media_sha256": true,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": 5561024,
+      "expected_sha256": "4bdb36e8dec8b3655b5e95ae0619c759e5c24568075c7ebb45e991cc1a538a47",
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/AVUT/EA6h4omEXwg.mp4",
+      "qa_count": 1,
+      "remote_path": "EA6h4omEXwg.mp4",
+      "scene_audio_path": "datasets/AVUT/train_videos/EA6h4omEXwg.mp4",
+      "source_dataset": "AVUT",
+      "source_revision": "558ca95ac16c972a4de2028fbecef2a8b82fdb00",
+      "status": "skipped",
+      "task_distribution": {
+        "audio": 1
+      },
+      "video_id": "214",
+      "video_path": "datasets/AVUT/train_videos/EA6h4omEXwg.mp4",
+      "youtube_id": "EA6h4omEXwg"
+    },
+    {
+      "candidate_id": "avut:Pcn0R5hXvzI",
+      "download_url": "https://huggingface.co/datasets/tsinghua-ee/AVUTBenchmark/resolve/558ca95ac16c972a4de2028fbecef2a8b82fdb00/Pcn0R5hXvzI.mp4",
+      "elapsed_sec": 0.0,
+      "exclusion_checks": {
+        "media_sha256": true,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": 3927460,
+      "expected_sha256": "f9191c9d7d34d21952a470b202b66f54480ccf8b3108665e45336bba1f1f0679",
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/AVUT/Pcn0R5hXvzI.mp4",
+      "qa_count": 2,
+      "remote_path": "Pcn0R5hXvzI.mp4",
+      "scene_audio_path": "datasets/AVUT/train_videos/Pcn0R5hXvzI.mp4",
+      "source_dataset": "AVUT",
+      "source_revision": "558ca95ac16c972a4de2028fbecef2a8b82fdb00",
+      "status": "skipped",
+      "task_distribution": {
+        "audio": 1,
+        "audio_visual": 1
+      },
+      "video_id": "370",
+      "video_path": "datasets/AVUT/train_videos/Pcn0R5hXvzI.mp4",
+      "youtube_id": "Pcn0R5hXvzI"
+    },
+    {
+      "candidate_id": "music_avqa_v2:0Hi8jgH-6Mc",
+      "derived_video_ids": [
+        "0Hi8jgH-6Mc"
+      ],
+      "duration": "1:00",
+      "duration_seconds": 60.0,
+      "elapsed_sec": 17.686,
+      "exclusion_checks": {
+        "media_sha256": null,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": null,
+      "expected_sha256": null,
+      "has_flip": false,
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/0Hi8jgH-6Mc.mp4",
+      "qa_count": 7,
+      "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/0Hi8jgH-6Mc.mp4",
+      "source_dataset": "MUSIC-AVQA-v2.0",
+      "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+      "source_url": "https://www.youtube.com/watch?v=0Hi8jgH-6Mc",
+      "start_seconds": 0.0,
+      "start_time": "0:00",
+      "status": "downloaded",
+      "suffix": "",
+      "task_distribution": {
+        "audio": 2,
+        "audio_visual": 3,
+        "visual": 2
+      },
+      "task_subtypes": {
+        "audio:counting": 2,
+        "audio_visual:counting": 3,
+        "visual:counting": 2
+      },
+      "video_id": "0Hi8jgH-6Mc",
+      "video_path": "datasets/MUSIC_AVQA_V2/videos/0Hi8jgH-6Mc.mp4",
+      "youtube_id": "0Hi8jgH-6Mc"
+    },
+    {
+      "candidate_id": "music_avqa_v2:V__V_NQo_OI",
+      "derived_video_ids": [
+        "V__V_NQo_OI"
+      ],
+      "duration": "1:00",
+      "duration_seconds": 60.0,
+      "elapsed_sec": 17.893,
+      "exclusion_checks": {
+        "media_sha256": null,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": null,
+      "expected_sha256": null,
+      "has_flip": false,
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/V__V_NQo_OI.mp4",
+      "qa_count": 5,
+      "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/V__V_NQo_OI.mp4",
+      "source_dataset": "MUSIC-AVQA-v2.0",
+      "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+      "source_url": "https://www.youtube.com/watch?v=V__V_NQo_OI",
+      "start_seconds": 0.0,
+      "start_time": "0:00",
+      "status": "downloaded",
+      "suffix": "",
+      "task_distribution": {
+        "audio": 1,
+        "audio_visual": 3,
+        "visual": 1
+      },
+      "task_subtypes": {
+        "audio:counting": 1,
+        "audio_visual:counting": 3,
+        "visual:counting": 1
+      },
+      "video_id": "V__V_NQo_OI",
+      "video_path": "datasets/MUSIC_AVQA_V2/videos/V__V_NQo_OI.mp4",
+      "youtube_id": "V__V_NQo_OI"
+    },
+    {
+      "candidate_id": "music_avqa_v2:gw7poB4hHG0",
+      "derived_video_ids": [
+        "gw7poB4hHG0",
+        "gw7poB4hHG0_flip"
+      ],
+      "duration": "1:00",
+      "duration_seconds": 60.0,
+      "elapsed_sec": 51.058,
+      "exclusion_checks": {
+        "media_sha256": null,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": null,
+      "expected_sha256": null,
+      "has_flip": true,
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/gw7poB4hHG0.mp4",
+      "qa_count": 5,
+      "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/gw7poB4hHG0.mp4",
+      "source_dataset": "MUSIC-AVQA-v2.0",
+      "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+      "source_url": "https://www.youtube.com/watch?v=gw7poB4hHG0",
+      "start_seconds": 0.0,
+      "start_time": "0:00",
+      "status": "downloaded",
+      "suffix": "",
+      "task_distribution": {
+        "audio": 1,
+        "audio_visual": 3,
+        "visual": 1
+      },
+      "task_subtypes": {
+        "audio:counting": 1,
+        "audio_visual:temporal": 3,
+        "visual:counting": 1
+      },
+      "video_id": "gw7poB4hHG0",
+      "video_path": "datasets/MUSIC_AVQA_V2/videos/gw7poB4hHG0.mp4",
+      "youtube_id": "gw7poB4hHG0"
+    }
+  ],
+  "status": "PASS"
+}

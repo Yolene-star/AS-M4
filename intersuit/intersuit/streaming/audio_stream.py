@@ -53,7 +53,28 @@ def load_scene_audio(
 
     suffix = path.suffix.lower()
     if suffix in {".wav", ".flac", ".mp3", ".ogg", ".m4a"}:
-        waveform, source_rate = torchaudio.load(str(path))
+        try:
+            waveform, source_rate = torchaudio.load(str(path))
+        except (RuntimeError, OSError):
+            # Some CPU environments ship torchaudio without an IO backend.
+            # Keep scene-audio loading functional through the same ffmpeg path
+            # used for video containers.
+            channels = 1 if mono else 2
+            command = [
+                "ffmpeg", "-v", "error", "-i", str(path), "-vn",
+                "-ac", str(channels), "-ar", str(sample_rate),
+                "-acodec", "pcm_f32le", "-f", "f32le", "pipe:1",
+            ]
+            decoded = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            if decoded.returncode != 0 or not decoded.stdout:
+                raise RuntimeError(
+                    f"ffmpeg scene-audio decode failed for {path}: "
+                    f"{decoded.stderr.decode(errors='replace').strip()}"
+                )
+            waveform = torch.frombuffer(bytearray(decoded.stdout), dtype=torch.float32).clone()
+            if channels > 1:
+                waveform = waveform.reshape(-1, channels).transpose(0, 1).contiguous()
+            source_rate = sample_rate
     else:
         channels = 1 if mono else 2
         command = [
