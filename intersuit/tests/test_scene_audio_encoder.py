@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import types
 from pathlib import Path
 
 import pytest
 import torch
+from torch import nn
+from accelerate import init_empty_weights
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -125,6 +128,51 @@ def test_frozen_beats_encoder_requires_local_checkpoint_and_source(tmp_path):
             checkpoint_path=str(tmp_path / "missing.pt"),
             code_root=str(tmp_path / "missing_source"),
         )
+
+
+def test_frozen_beats_materializes_external_weights_inside_meta_context(
+    monkeypatch,
+    tmp_path,
+):
+    source = tmp_path / "beats" / "BEATs.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("# test source\n", encoding="utf-8")
+
+    class FakeConfig:
+        def __init__(self, _cfg):
+            self.encoder_embed_dim = 2
+
+    class FakeBEATs(nn.Module):
+        def __init__(self, cfg):
+            super().__init__()
+            self.cfg = cfg
+            self.weight = nn.Parameter(torch.ones(2))
+
+    fake_module = types.ModuleType("beats.BEATs")
+    fake_module.BEATsConfig = FakeConfig
+    fake_module.BEATs = FakeBEATs
+    monkeypatch.setitem(sys.modules, "beats.BEATs", fake_module)
+
+    checkpoint = tmp_path / "beats.pt"
+    torch.save(
+        {
+            "cfg": {"encoder_embed_dim": 2},
+            "model": {"weight": torch.tensor([2.0, 3.0])},
+        },
+        checkpoint,
+    )
+
+    with init_empty_weights():
+        encoder = FrozenBEATsSceneAudioEncoder(
+            hidden_size=4,
+            checkpoint_path=str(checkpoint),
+            code_root=str(tmp_path),
+        )
+
+    assert encoder.beats_model.weight.device.type == "cpu"
+    assert encoder.beats_model.weight.is_meta is False
+    assert torch.equal(encoder.beats_model.weight, torch.tensor([2.0, 3.0]))
+    assert encoder.audio_projector.weight.is_meta is True
 
 
 if __name__ == "__main__":

@@ -264,6 +264,14 @@ class FrozenBEATsSceneAudioEncoder(nn.Module):
             raise ValueError("BEATs checkpoint does not contain model weights")
 
         beats = beats_class(beats_config(cfg))
+        # ``from_pretrained(low_cpu_mem_usage=True)`` constructs the enclosing
+        # M4 model under ``init_empty_weights``. BEATs is external and absent
+        # from the saved M4 state dict, so materialize it before loading its
+        # own checkpoint instead of leaving unusable meta tensors behind.
+        if any(parameter.is_meta for parameter in beats.parameters()) or any(
+            buffer.is_meta for buffer in beats.buffers()
+        ):
+            beats.to_empty(device=torch.device("cpu"))
         incompatible = beats.load_state_dict(_strip_module_prefix(state), strict=False)
         allowed_missing = {"predictor.weight", "predictor.bias"}
         disallowed_missing = sorted(set(incompatible.missing_keys) - allowed_missing)
