@@ -159,3 +159,35 @@ def test_launcher_blocks_before_training_process(tmp_path):
     )
     assert proc.returncode != 0
     assert "审计" in proc.stderr
+
+
+def test_launcher_gate_only_accepts_matching_audit(tmp_path):
+    manifest = tmp_path / "train.json"
+    manifest.write_text("[]\n", encoding="utf-8")
+    digest = sha256_file(manifest)
+    audit = tmp_path / "audit.json"
+    audit.write_text(json.dumps({
+        "status": "PASS",
+        "manifest_path": str(manifest.resolve()),
+        "manifest_sha256": digest,
+        "exclusion_set_sha256": "locked",
+        "video_id_overlap_count": 0,
+        "youtube_id_overlap_count": 0,
+        "media_sha256_overlap_count": 0,
+        "error_count": 0,
+    }), encoding="utf-8")
+    script = Path(__file__).resolve().parents[1] / "scripts" / "run_as_m4_beats_stage.sh"
+    proc = subprocess.run(
+        ["bash", str(script), "12k-smoke"],
+        cwd=script.parent.parent,
+        env={
+            **__import__("os").environ,
+            "DATA_PATH": str(manifest),
+            "TRAIN_MANIFEST_AUDIT": str(audit),
+            "AS_M4_GATE_ONLY": "1",
+        },
+        text=True,
+        capture_output=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "仅检查，不启动训练" in proc.stdout

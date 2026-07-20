@@ -51,6 +51,11 @@ if not audit.get("exclusion_set_sha256"):
 print("训练 manifest 内容门禁：PASS")
 PY
 
+if [[ "${AS_M4_GATE_ONLY:-0}" == "1" ]]; then
+  echo "AS-M4 BEATs 启动器内容门禁：PASS（仅检查，不启动训练）"
+  exit 0
+fi
+
 export AS_M4_ENABLE_SCENE_AUDIO=1
 export AS_M4_SCENE_AUDIO_ENCODER_TYPE=beats
 export CKPT_PATH="${CKPT_PATH:-$INTERSUIT_ROOT/checkpoints/M4-LongVA-7B-Qwen2-train-12k-lowmem-nofreeze}"

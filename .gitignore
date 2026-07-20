@@ -23,6 +23,7 @@ intersuit/datasets/AVE_HF_*/
 intersuit/datasets/LLP/
 intersuit/external/AVUT/
 intersuit/datasets/NEW_AV_TRAIN/
+intersuit/datasets/AS_M4_STAGE2/
 intersuit/harness/artifacts/as_m4_avut_smoke/
 intersuit/harness/artifacts/
 intersuit/intersuit/harness/artifacts/
