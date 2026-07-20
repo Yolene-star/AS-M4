@@ -256,6 +256,11 @@ class LlavaMetaModel:
             "as_m4_simple_audio_gate",
             1.0,
         )
+        self.config.as_m4_inference_simple_audio_gate = getattr(
+            model_args,
+            "as_m4_inference_simple_audio_gate",
+            None,
+        )
         self.config.enable_audio_confidence_gate_v1 = getattr(
             model_args, "enable_audio_confidence_gate_v1", False
         )
@@ -590,11 +595,15 @@ class LlavaMetaForCausalLM(ABC):
                     audio_mask,
                     num_frames,
                 )
-                gate_value = (
-                    float(force_audio_gate)
-                    if force_audio_gate is not None
-                    else float(getattr(self.config, "as_m4_simple_audio_gate", 1.0))
+                default_gate = float(getattr(self.config, "as_m4_simple_audio_gate", 1.0))
+                inference_gate = getattr(
+                    self.config,
+                    "as_m4_inference_simple_audio_gate",
+                    None,
                 )
+                if not getattr(self, "training", False) and inference_gate is not None:
+                    default_gate = float(inference_gate)
+                gate_value = float(force_audio_gate) if force_audio_gate is not None else default_gate
                 if not math.isfinite(gate_value) or not 0.0 <= gate_value <= 1.0:
                     raise ValueError("as_m4_simple_audio_gate must be finite and in [0,1]")
                 gate = torch.full(

@@ -134,6 +134,9 @@ EXTRA_TRAIN_ARGS+=(--as_m4_fusion_init "${AS_M4_FUSION_INIT:-zero}")
 EXTRA_TRAIN_ARGS+=(--as_m4_gate_logit_bias "${AS_M4_GATE_LOGIT_BIAS:--5.0}")
 EXTRA_TRAIN_ARGS+=(--as_m4_fusion_mode "${AS_M4_FUSION_MODE:-aligned_gated}")
 EXTRA_TRAIN_ARGS+=(--as_m4_simple_audio_gate "${AS_M4_SIMPLE_AUDIO_GATE:-1.0}")
+if [ -n "${AS_M4_INFERENCE_SIMPLE_AUDIO_GATE:-}" ]; then
+    EXTRA_TRAIN_ARGS+=(--as_m4_inference_simple_audio_gate "${AS_M4_INFERENCE_SIMPLE_AUDIO_GATE}")
+fi
 EXTRA_TRAIN_ARGS+=(--scene_audio_window_mode "${AS_M4_SCENE_AUDIO_WINDOW_MODE:-fixed}")
 EXTRA_TRAIN_ARGS+=(--dynamic_window_scales_sec "${AS_M4_DYNAMIC_WINDOW_SCALES_SEC:-1.0,2.0,4.0}")
 EXTRA_TRAIN_ARGS+=(--dynamic_window_top_k "${AS_M4_DYNAMIC_WINDOW_TOP_K:-16}")

@@ -198,4 +198,8 @@ def test_beats_launcher_uses_validated_conservative_gate_default():
 
     content = script.read_text(encoding="utf-8")
 
-    assert 'AS_M4_SIMPLE_AUDIO_GATE="${AS_M4_SIMPLE_AUDIO_GATE:-0.25}"' in content
+    assert 'AS_M4_SIMPLE_AUDIO_GATE="${AS_M4_SIMPLE_AUDIO_GATE:-1.0}"' in content
+    assert (
+        'AS_M4_INFERENCE_SIMPLE_AUDIO_GATE="${AS_M4_INFERENCE_SIMPLE_AUDIO_GATE:-0.25}"'
+        in content
+    )

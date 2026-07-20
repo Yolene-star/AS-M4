@@ -37,6 +37,7 @@ DEFAULT_CONFIG_KEYS = [
     "image_aspect_ratio",
     "as_m4_fusion_init",
     "as_m4_gate_logit_bias",
+    "as_m4_inference_simple_audio_gate",
 ]
 
 

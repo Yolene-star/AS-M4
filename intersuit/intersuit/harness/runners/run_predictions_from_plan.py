@@ -670,6 +670,11 @@ def model_prediction(
     previous_event_aligner_v1 = getattr(model.config, "enable_audio_event_aligner_v1", False)
     previous_fusion_mode = getattr(model.config, "as_m4_fusion_mode", "aligned_gated")
     previous_simple_audio_gate = getattr(model.config, "as_m4_simple_audio_gate", 1.0)
+    previous_inference_simple_audio_gate = getattr(
+        model.config,
+        "as_m4_inference_simple_audio_gate",
+        None,
+    )
     if force_audio_gate is not None:
         model.config.force_audio_gate = float(force_audio_gate)
     if enable_scene_audio is not None:
@@ -693,8 +698,17 @@ def model_prediction(
         exp.get("env", {}).get("AS_M4_SIMPLE_AUDIO_GATE")
         or previous_simple_audio_gate
     )
+    inference_simple_audio_gate = exp.get("env", {}).get(
+        "AS_M4_INFERENCE_SIMPLE_AUDIO_GATE"
+    )
+    active_inference_simple_audio_gate = (
+        float(inference_simple_audio_gate)
+        if inference_simple_audio_gate is not None
+        else previous_inference_simple_audio_gate
+    )
     model.config.as_m4_fusion_mode = active_fusion_mode
     model.config.as_m4_simple_audio_gate = active_simple_audio_gate
+    model.config.as_m4_inference_simple_audio_gate = active_inference_simple_audio_gate
     streaming_av_module = getattr(model.get_model(), "streaming_av_module", None)
     if isinstance(streaming_av_module, list):
         streaming_av_module = streaming_av_module[0]
@@ -802,6 +816,7 @@ def model_prediction(
             model.config.enable_audio_event_aligner_v1 = previous_event_aligner_v1
             model.config.as_m4_fusion_mode = previous_fusion_mode
             model.config.as_m4_simple_audio_gate = previous_simple_audio_gate
+            model.config.as_m4_inference_simple_audio_gate = previous_inference_simple_audio_gate
             if previous_module_gate_v1 is not None:
                 streaming_av_module.confidence_gate.enable_v1 = previous_module_gate_v1
     diagnostics = None
@@ -825,6 +840,7 @@ def model_prediction(
     token_debug["audio_event_aligner_v1"] = active_event_aligner_v1
     token_debug["as_m4_fusion_mode"] = active_fusion_mode
     token_debug["as_m4_simple_audio_gate"] = active_simple_audio_gate
+    token_debug["as_m4_inference_simple_audio_gate"] = active_inference_simple_audio_gate
     token_debug["first_token_logits"] = first_token_logits
     return prediction, diagnostics, {"prompt": prompt_debug, "tokens": token_debug}
 

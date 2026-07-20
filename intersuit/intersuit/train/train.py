@@ -141,6 +141,7 @@ class ModelArguments:
     as_m4_gate_logit_bias: float = field(default=-5.0)
     as_m4_fusion_mode: str = field(default="aligned_gated")
     as_m4_simple_audio_gate: float = field(default=1.0)
+    as_m4_inference_simple_audio_gate: Optional[float] = field(default=None)
     enable_audio_confidence_gate_v1: bool = field(default=False)
     audio_gate_silence_threshold: float = field(default=1e-4)
     audio_gate_rms_reference: float = field(default=0.05)
