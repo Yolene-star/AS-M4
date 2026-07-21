@@ -187,6 +187,42 @@ def test_oracle_backend_writes_prediction_files(tmp_path):
     assert json.loads(e3_rows[0])["correct"] is False
 
 
+def test_oracle_backend_can_skip_locked_manifest_prefix(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    _write_json(
+        manifest,
+        [
+            {
+                "id": sample_id,
+                "conversations": [
+                    {"from": "human", "value": "Q"},
+                    {"from": "gpt", "value": "A"},
+                ],
+            }
+            for sample_id in ("s0", "s1", "s2")
+        ],
+    )
+    output = tmp_path / "pred.jsonl"
+    plan = tmp_path / "plan.jsonl"
+    plan.write_text(
+        json.dumps({"id": "E2", "manifest": str(manifest), "output_jsonl": str(output)}) + "\n",
+        encoding="utf-8",
+    )
+
+    runner.run_predictions(
+        plan,
+        backend="oracle",
+        limit=None,
+        skip=1,
+        feature_root=tmp_path,
+        device="cpu",
+        max_new_tokens=4,
+    )
+
+    rows = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert [row["sample_id"] for row in rows] == ["s1", "s2"]
+
+
 def test_dry_run_does_not_create_prediction_files(tmp_path):
     plan = tmp_path / "plan.jsonl"
     pred = tmp_path / "pred.jsonl"
@@ -360,6 +396,44 @@ def test_mismatched_condition_skips_rows_without_audio():
     )
 
     assert mismatched["scene_audio_path"] == "third.mp4"
+
+
+def test_mismatched_condition_prefers_same_task_with_different_event():
+    qa0 = {
+        "id": "first_turn0",
+        "sample_id": "first",
+        "physical_media_id": "media-1",
+        "scene_audio_path": "first.mp4",
+        "task_type": "audio",
+        "event_label": "dog",
+    }
+    same_event = {
+        "id": "second_turn0",
+        "sample_id": "second",
+        "physical_media_id": "media-2",
+        "scene_audio_path": "second.mp4",
+        "task_type": "audio",
+        "event_label": "dog",
+    }
+    different_event = {
+        "id": "third_turn0",
+        "sample_id": "third",
+        "physical_media_id": "media-3",
+        "scene_audio_path": "third.mp4",
+        "task_type": "audio",
+        "event_label": "piano",
+    }
+
+    mismatched = runner.apply_audio_condition(
+        qa0,
+        {"audio_condition": "mismatched"},
+        [qa0, same_event, different_event],
+        0,
+    )
+
+    assert mismatched["scene_audio_path"] == "third.mp4"
+    assert mismatched["mismatch_source_physical_media_id"] == "media-3"
+    assert mismatched["mismatch_source_event_label"] == "piano"
 
 
 def test_scene_audio_backend_is_installed_once_per_signature(monkeypatch):

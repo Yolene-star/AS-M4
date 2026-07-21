@@ -261,6 +261,12 @@ class LlavaMetaModel:
             "as_m4_inference_simple_audio_gate",
             None,
         )
+        self.config.scene_audio_contrastive_weight = getattr(
+            model_args, "scene_audio_contrastive_weight", 0.0
+        )
+        self.config.scene_audio_contrastive_margin = getattr(
+            model_args, "scene_audio_contrastive_margin", 0.2
+        )
         self.config.enable_audio_confidence_gate_v1 = getattr(
             model_args, "enable_audio_confidence_gate_v1", False
         )

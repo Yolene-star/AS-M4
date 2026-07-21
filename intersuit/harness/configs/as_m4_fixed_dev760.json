@@ -1,0 +1,67 @@
+{
+  "dataset": {
+    "name": "AS_M4_STAGE2",
+    "split": "dev760_fixed_selectivity",
+    "manifest": "/home/yjm/M4-main/intersuit/datasets/AS_M4_STAGE2/dev_manifest.json",
+    "manifest_sha256": "0237cdebfb54c2766cd17ab709293862be381fa17ca809d101fbce37d617fb10",
+    "scorer": "label_terms"
+  },
+  "models": {
+    "baseline_m4": "/home/yjm/M4-main/intersuit/checkpoints/M4-LongVA-7B-Qwen2-train-12k-lowmem-nofreeze",
+    "as_m4": "/home/yjm/M4-main/intersuit/checkpoints/AS-M4-BEATs-fixed-stage2-full-v1-20260720"
+  },
+  "output_root": "/home/yjm/M4-main/intersuit/harness/artifacts/as_m4_beats_fixed_stage2_dev760/predictions",
+  "experiment_ids": [
+    "DEV760_VIDEO_ONLY",
+    "DEV760_CORRECT",
+    "DEV760_MISMATCHED",
+    "DEV760_SILENCE",
+    "DEV760_GATE0"
+  ],
+  "experiments": [
+    {
+      "id": "DEV760_VIDEO_ONLY",
+      "model_key": "baseline_m4",
+      "audio_condition": "none",
+      "rollback_mode": "weights12k",
+      "alignment": "off",
+      "gate_ablation": "none"
+    },
+    {
+      "id": "DEV760_CORRECT",
+      "model_key": "as_m4",
+      "audio_condition": "correct",
+      "rollback_mode": "none",
+      "alignment": "off",
+      "gate_ablation": "none"
+    },
+    {
+      "id": "DEV760_MISMATCHED",
+      "model_key": "as_m4",
+      "audio_condition": "mismatched",
+      "rollback_mode": "none",
+      "alignment": "off",
+      "gate_ablation": "none"
+    },
+    {
+      "id": "DEV760_SILENCE",
+      "model_key": "as_m4",
+      "audio_condition": "correct",
+      "rollback_mode": "none",
+      "alignment": "off",
+      "gate_ablation": "none",
+      "env": {
+        "AS_M4_DEBUG_AUDIO_CONDITION": "silence"
+      }
+    },
+    {
+      "id": "DEV760_GATE0",
+      "model_key": "as_m4",
+      "audio_condition": "correct",
+      "rollback_mode": "gate0",
+      "force_audio_gate": "0",
+      "alignment": "off",
+      "gate_ablation": "all"
+    }
+  ]
+}

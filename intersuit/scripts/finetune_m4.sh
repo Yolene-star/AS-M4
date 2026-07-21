@@ -137,6 +137,8 @@ EXTRA_TRAIN_ARGS+=(--as_m4_simple_audio_gate "${AS_M4_SIMPLE_AUDIO_GATE:-1.0}")
 if [ -n "${AS_M4_INFERENCE_SIMPLE_AUDIO_GATE:-}" ]; then
     EXTRA_TRAIN_ARGS+=(--as_m4_inference_simple_audio_gate "${AS_M4_INFERENCE_SIMPLE_AUDIO_GATE}")
 fi
+EXTRA_TRAIN_ARGS+=(--scene_audio_contrastive_weight "${AS_M4_SCENE_AUDIO_CONTRASTIVE_WEIGHT:-0.0}")
+EXTRA_TRAIN_ARGS+=(--scene_audio_contrastive_margin "${AS_M4_SCENE_AUDIO_CONTRASTIVE_MARGIN:-0.2}")
 EXTRA_TRAIN_ARGS+=(--scene_audio_window_mode "${AS_M4_SCENE_AUDIO_WINDOW_MODE:-fixed}")
 EXTRA_TRAIN_ARGS+=(--dynamic_window_scales_sec "${AS_M4_DYNAMIC_WINDOW_SCALES_SEC:-1.0,2.0,4.0}")
 EXTRA_TRAIN_ARGS+=(--dynamic_window_top_k "${AS_M4_DYNAMIC_WINDOW_TOP_K:-16}")

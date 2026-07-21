@@ -57,6 +57,19 @@ def test_scene_audio_mixed_batch_pads_and_masks():
     assert torch.all(batch["scene_audios"][1] == 0)
 
 
+def test_scene_audio_negative_batch_pads_and_masks():
+    collator = DataCollatorForSupervisedDataset(tokenizer=DummyTokenizer())
+    a = _base_instance()
+    a["scene_audio_negative"] = torch.ones(2, 4)
+    a["scene_audio_negative_timestamps"] = torch.tensor([[0.0, 1.0], [0.5, 1.5]])
+    b = _base_instance(2)
+
+    batch = collator([a, b])
+
+    assert batch["scene_audio_negatives"].shape == (2, 2, 4)
+    assert batch["scene_audio_negative_mask"].tolist() == [[True, True], [False, False]]
+
+
 def test_old_speech_collate_path_still_stacks():
     collator = DataCollatorForSupervisedDataset(tokenizer=DummyTokenizer())
     a = _base_instance()

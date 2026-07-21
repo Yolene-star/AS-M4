@@ -142,6 +142,8 @@ class ModelArguments:
     as_m4_fusion_mode: str = field(default="aligned_gated")
     as_m4_simple_audio_gate: float = field(default=1.0)
     as_m4_inference_simple_audio_gate: Optional[float] = field(default=None)
+    scene_audio_contrastive_weight: float = field(default=0.0)
+    scene_audio_contrastive_margin: float = field(default=0.2)
     enable_audio_confidence_gate_v1: bool = field(default=False)
     audio_gate_silence_threshold: float = field(default=1e-4)
     audio_gate_rms_reference: float = field(default=0.05)
@@ -1483,6 +1485,8 @@ class LazySupervisedDataset(Dataset):
             or self.list_data_dict[i].get("scene_audio_path")
         ):
             data_dict.update(self._load_scene_audio_fields(self.list_data_dict[i]))
+        if self.list_data_dict[i].get("scene_audio_negative_path"):
+            data_dict.update(self._load_scene_audio_negative_fields(self.list_data_dict[i]))
         # prompt exist in the data
         if prompt is not None:
             data_dict["prompt"] = prompt
@@ -1528,6 +1532,22 @@ class LazySupervisedDataset(Dataset):
             if key in sample:
                 result[key] = torch.as_tensor(sample[key])
         return result
+
+    def _load_scene_audio_negative_fields(self, sample: Dict) -> Dict[str, torch.Tensor]:
+        negative, timestamps = _load_scene_audio_media(
+            sample["scene_audio_negative_path"],
+            folder=self.data_args.scene_audio_folder,
+            sample_rate=int(
+                sample.get("scene_audio_negative_sample_rate")
+                or self.data_args.scene_audio_data_sample_rate
+            ),
+            window_sec=float(sample.get("scene_audio_negative_window_sec") or 1.0),
+            hop_sec=float(sample.get("scene_audio_negative_hop_sec") or 0.5),
+        )
+        return {
+            "scene_audio_negative": negative,
+            "scene_audio_negative_timestamps": timestamps,
+        }
 
 
 @dataclass
@@ -1598,6 +1618,18 @@ class DataCollatorForSupervisedDataset(object):
                     batch[key] = [
                         instance.get(key) for instance in instances
                     ]
+
+        if any("scene_audio_negative" in instance for instance in instances):
+            negative_tensors = [instance.get("scene_audio_negative") for instance in instances]
+            (
+                batch["scene_audio_negatives"],
+                batch["scene_audio_negative_mask"],
+            ) = _pad_scene_audio_batch(negative_tensors)
+            batch["scene_audio_negative_timestamps"] = _pad_scene_audio_timestamps(
+                [instance.get("scene_audio_negative_timestamps") for instance in instances],
+                batch["scene_audio_negatives"].shape[1],
+                batch["scene_audio_negatives"].device,
+            )
 
         if "prompt" in instances[0]:
             batch["prompts"] = [instance["prompt"] for instance in instances]

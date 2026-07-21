@@ -87,6 +87,11 @@ def iter_qa_samples(manifest: Path, limit: int | None = None) -> list[dict[str, 
                     "scene_audio_hop_sec": sample.get("scene_audio_hop_sec", 0.5),
                     "scene_audio_timestamps": sample.get("scene_audio_timestamps"),
                     "frame_timestamps": sample.get("frame_timestamps"),
+                    "physical_media_id": sample.get("physical_media_id"),
+                    "source_dataset": sample.get("source_dataset"),
+                    "task_type": sample.get("task_type"),
+                    "event_label": sample.get("event_label"),
+                    "audio_sha256": sample.get("audio_sha256"),
                     "accept_contains": sample.get("accept_contains"),
                     "accept_regex": sample.get("accept_regex"),
                 }
@@ -287,13 +292,16 @@ def apply_audio_condition(
         return result
 
     if condition == "mismatched":
-        source = None
+        candidates: list[tuple[tuple[int, int, int], int, dict[str, Any]]] = []
         current_id = result.get("sample_id") or result.get("id")
         current_path = result.get("scene_audio_path")
+        current_media = result.get("physical_media_id")
+        current_label = normalize_text(result.get("event_label"))
         for offset in range(1, len(audio_pool) + 1):
             candidate = audio_pool[(sample_index + offset) % len(audio_pool)]
             candidate_id = candidate.get("sample_id") or candidate.get("id")
             candidate_path = candidate.get("scene_audio_path")
+            candidate_media = candidate.get("physical_media_id")
             has_audio = candidate.get("scene_audio") is not None or bool(candidate_path)
             same_source = (
                 current_id is not None
@@ -301,12 +309,24 @@ def apply_audio_condition(
                 and candidate_id == current_id
             ) or (
                 current_path is not None and candidate_path == current_path
+            ) or (
+                current_media is not None
+                and candidate_media is not None
+                and candidate_media == current_media
             )
             if has_audio and not same_source:
-                source = candidate
-                break
-        if source is None:
+                candidate_label = normalize_text(candidate.get("event_label"))
+                different_known_label = int(
+                    bool(current_label and candidate_label and current_label != candidate_label)
+                )
+                same_task = int(candidate.get("task_type") == result.get("task_type"))
+                same_dataset = int(candidate.get("source_dataset") == result.get("source_dataset"))
+                candidates.append(((different_known_label, same_task, same_dataset), -offset, candidate))
+        if not candidates:
             raise ValueError(f"没有可用于 {result.get('id')} 的不同来源错配音频")
+        if current_label and any(score[0] for score, _offset, _candidate in candidates):
+            candidates = [item for item in candidates if item[0][0]]
+        _score, _offset, source = max(candidates, key=lambda item: (item[0], item[1]))
         result["scene_audio"] = source.get("scene_audio")
         result["scene_audio_timestamps"] = source.get("scene_audio_timestamps")
         if source.get("scene_audio_path"):
@@ -320,6 +340,9 @@ def apply_audio_condition(
                     result[key] = source[key]
         else:
             result["scene_audio_path"] = None
+        result["mismatch_source_id"] = source.get("sample_id") or source.get("id")
+        result["mismatch_source_physical_media_id"] = source.get("physical_media_id")
+        result["mismatch_source_event_label"] = source.get("event_label")
         return result
 
     if audio is None:
@@ -852,6 +875,7 @@ def run_predictions(
     feature_root: Path,
     device: str,
     max_new_tokens: int,
+    skip: int = 0,
     experiments: set[str] | None = None,
     model_name_override: str | None = None,
     dry_run: bool = False,
@@ -877,12 +901,16 @@ def run_predictions(
         if dry_run:
             continue
         all_samples = iter_qa_samples(manifest, limit=None)
-        samples = all_samples[:limit] if limit is not None else all_samples
+        if skip < 0:
+            raise ValueError("skip must be non-negative")
+        samples = all_samples[skip:]
+        if limit is not None:
+            samples = samples[:limit]
         output_jsonl.parent.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
         env.update({str(k): str(v) for k, v in (exp.get("env") or {}).items()})
         rows = []
-        for sample_index, qa in enumerate(samples):
+        for sample_index, qa in enumerate(samples, start=skip):
             qa = apply_audio_condition(qa, exp, all_samples, sample_index)
             if backend == "oracle":
                 prediction = oracle_prediction(str(qa["answer"]), str(exp["id"]), qa.get("id"))
@@ -918,6 +946,12 @@ def run_predictions(
                 "audio_condition": exp.get("audio_condition"),
                 "alignment": exp.get("alignment"),
                 "gate_ablation": exp.get("gate_ablation"),
+                "task_type": qa.get("task_type"),
+                "event_label": qa.get("event_label"),
+                "physical_media_id": qa.get("physical_media_id"),
+                "mismatch_source_id": qa.get("mismatch_source_id"),
+                "mismatch_source_physical_media_id": qa.get("mismatch_source_physical_media_id"),
+                "mismatch_source_event_label": qa.get("mismatch_source_event_label"),
             }
             if dump_diagnostics:
                 row["as_m4_diagnostics"] = diagnostics
@@ -956,6 +990,7 @@ def main() -> None:
     parser.add_argument("--plan", required=True)
     parser.add_argument("--backend", choices=["oracle", "model"], default="oracle")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--skip", type=int, default=0, help="Skip this many QA records at the start of the locked manifest.")
     parser.add_argument("--feature_root", default="intersuit/inputs/features/as_m4_smoke")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--max_new_tokens", type=int, default=64)
@@ -972,6 +1007,7 @@ def main() -> None:
         Path(args.plan),
         backend=args.backend,
         limit=args.limit,
+        skip=args.skip,
         feature_root=Path(args.feature_root),
         device=args.device,
         max_new_tokens=args.max_new_tokens,
