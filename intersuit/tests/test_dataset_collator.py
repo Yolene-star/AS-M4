@@ -143,6 +143,15 @@ def test_training_argument_parser_has_unique_scene_audio_options():
     assert "--scene_audio_data_sample_rate" in option_strings
 
 
+def test_qwen_checkpoint_detection_uses_config_not_directory_name():
+    config = types.SimpleNamespace(
+        model_type="llava_qwen",
+        architectures=["LlavaQwenForCausalLM"],
+    )
+
+    assert train_module._is_qwen_checkpoint("checkpoints/fixed-stage2", config)
+
+
 if __name__ == "__main__":
     test_scene_audio_mixed_batch_pads_and_masks()
     test_old_speech_collate_path_still_stacks()

@@ -1839,7 +1839,7 @@ def get_model(model_args, training_args, bnb_model_from_pretrained_args):
                 low_cpu_mem_usage=False,
                 **customized_kwargs,
             )
-        elif "qwen" in model_args.model_name_or_path.lower():
+        elif _is_qwen_checkpoint(model_args.model_name_or_path, cfg_pretrained):
             if "moe" in model_args.model_name_or_path.lower() or "A14B" in model_args.model_name_or_path:
                 model = LlavaQwenMoeForCausalLM.from_pretrained(
                     model_args.model_name_or_path,
@@ -1882,6 +1882,13 @@ def get_model(model_args, training_args, bnb_model_from_pretrained_args):
             **customized_kwargs,
         )
     return model
+
+
+def _is_qwen_checkpoint(model_name_or_path: str, config) -> bool:
+    model_type = str(getattr(config, "model_type", "") or "").lower()
+    architectures = " ".join(str(value) for value in (getattr(config, "architectures", None) or [])).lower()
+    identity = f"{model_name_or_path} {model_type} {architectures}".lower()
+    return "qwen" in identity
 
 
 def train(attn_implementation=None):
@@ -1969,7 +1976,7 @@ def train(attn_implementation=None):
 
     if "mistral" in model_args.model_name_or_path.lower() or "mixtral" in model_args.model_name_or_path.lower() or "zephyr" in model_args.model_name_or_path.lower():
         tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=training_args.cache_dir, model_max_length=training_args.model_max_length, padding_side="left")
-    elif "qwen" in model_args.model_name_or_path.lower():
+    elif _is_qwen_checkpoint(model_args.model_name_or_path, model.config):
         tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=training_args.cache_dir, model_max_length=training_args.model_max_length, padding_side="right")
     elif (
         "wizardlm-2" in model_args.model_name_or_path.lower()

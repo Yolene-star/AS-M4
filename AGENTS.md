@@ -10,6 +10,15 @@
 
 代码标识符、命令、路径、环境变量、模型名、文件名、参数名和必须与程序匹配的模式名可以保留英文原文，避免破坏可执行性。
 
+## Python/Conda 环境要求
+
+后续所有 Python 相关操作，包括运行脚本、测试、训练、数据处理和安装依赖，都必须选择 Conda 中已经配置好的环境，不得直接使用未经确认的系统 Python、默认 shell 中的 Python 或临时新建环境。
+
+- M4/AS-M4 项目代码默认使用已有的 `M4` 环境，例如 `conda run -n M4 python ...`、`conda run -n M4 pytest ...`，或先执行 `conda activate M4`。
+- 如果某项任务确实需要其他依赖，必须先从 `conda env list` 中选择已经存在且匹配的环境；不得自行创建新环境或在不相关环境中安装依赖，除非用户明确同意。
+- 每次执行 Python 命令前都要确认所选 Conda 环境；诊断环境问题时应记录环境名，并可通过 `python -c "import sys; print(sys.executable)"` 核对解释器路径。
+- 自动化脚本、后台任务和长时间训练不能依赖交互式 shell 的隐式环境，必须显式激活 Conda 环境或使用 `conda run -n <环境名>`。
+
 ## GPU 映射
 
 | 物理 GPU | PCI Bus ID | NUMA 节点 | 状态 |
