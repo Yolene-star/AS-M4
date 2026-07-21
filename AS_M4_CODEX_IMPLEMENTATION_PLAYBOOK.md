@@ -123,6 +123,13 @@ AS-M4 必须同时支持行为回退和权重回退，二者不能混淆。
 脚本层配置约定：
 
 ```bash
+# 简写：行为回退，关闭 scene_audio 并强制 gate=0
+AS_M4_ROLLBACK_MODE=behavior
+
+# 简写：权重回退，加载保留的 12k / 32k 基线 checkpoint
+AS_M4_ROLLBACK_MODE=weights12k
+AS_M4_ROLLBACK_MODE=weights32k
+
 # 关闭 scene_audio，走原 M4 行为路径
 AS_M4_ENABLE_SCENE_AUDIO=0
 
@@ -136,7 +143,15 @@ MM_TUNABLE_PARTS=mm_vision_tower,mm_mlp_adapter,mm_language_model
 MM_TUNABLE_PARTS=mm_vision_tower,mm_mlp_adapter,mm_language_model,streaming_av_module
 ```
 
-验收要求：每次使用 `AS_M4_FORCE_AUDIO_GATE=0` 或 `AS_M4_ENABLE_SCENE_AUDIO=0` 时，dry-run 生成的 `.env` 必须记录这些值；E1/E7 归因实验必须保存对应 `.env` 和预测文件。
+`AS_M4_ROLLBACK_MODE` 的配置语义：
+
+- `none`：默认 AS-M4；
+- `behavior`：关闭 scene audio 路径并强制 gate=0；
+- `gate0`：仍执行 scene audio 编码、事件检测、时间对齐和门控探针，但融合处强制 `gate=0`；
+- `weights12k`：加载 `AS_M4_BASELINE_CKPT_12K`，默认对应本地 12k no-freeze 基线；
+- `weights32k`：加载 `AS_M4_BASELINE_CKPT_32K`，默认对应本地 32k no-freeze 基线。
+
+验收要求：每次使用 `AS_M4_ROLLBACK_MODE`、`AS_M4_FORCE_AUDIO_GATE=0` 或 `AS_M4_ENABLE_SCENE_AUDIO=0` 时，dry-run 生成的 `.env` 必须记录这些值；E1/E7 归因实验必须保存对应 `.env` 和预测文件。冻结模块或从 `MM_TUNABLE_PARTS` 中移除模块不是权重恢复手段，只能停止后续训练更新；真正恢复原先内容必须加载保存的基线 checkpoint。
 
 ---
 
@@ -1314,6 +1329,70 @@ L_total = L_lm
 - q/r/g 直方图；
 - 显存、吞吐、checkpoint 大小。
 
+### NCCL smoke harness
+
+训练前必须先运行 NCCL smoke harness，尤其是 AS-M4 四卡任务：
+
+```bash
+CUDA_VISIBLE_DEVICES=0,2,3,4 \
+NCCL_DEBUG=WARN \
+NCCL_P2P_DISABLE=1 \
+NCCL_SHM_DISABLE=1 \
+NCCL_IB_DISABLE=1 \
+NCCL_SOCKET_IFNAME=lo \
+torchrun --standalone --nproc_per_node=4 intersuit/scripts/nccl_probe.py
+```
+
+通过标准：
+
+- `world_size=4`；
+- `all_reduce_sum=10.0`；
+- `.env` 记录 `NCCL_SOCKET_IFNAME=lo`。
+
+原因：本机 `eth0=169.254.3.1` 是链路本地地址，AS-M4 四卡 smoke 曾在 NCCL 自动选中该接口时出现 socket `message truncated` 与 collective mismatch。AS-M4 staged launcher 默认设置 `NCCL_SOCKET_IFNAME=lo`；如果实验者显式改用其他接口，必须重新运行 `nccl_probe.py` 并记录理由。
+
+### AS-only 最小真实 Trainer smoke
+
+在只训练 `streaming_av_module` 的 Stage A smoke 中，优先使用 DDP-only 路径，而不是 ZeRO-3：
+
+```bash
+CUDA_VISIBLE_DEVICES=0,2,3,4 \
+NUM_GPUS=4 \
+NCCL_SOCKET_IFNAME=lo \
+DEEPSPEED_CONFIG=none \
+TORCHDYNAMO_DISABLE=1 \
+DDP_FIND_UNUSED_PARAMETERS=True \
+DATA_PATH=inputs/texts/as_m4_smoke_video_features.json \
+VIDEO_FEATURE_FOLDER=inputs/features/as_m4_smoke \
+MID_RUN_NAME=AS-M4-12k-smoke-vfeat-asmodules-2step-ddp-notdynamo \
+MAX_STEPS=2 \
+SAVE_STRATEGY=no \
+RUN_PREFLIGHT=1 \
+MM_TUNABLE_PARTS=streaming_av_module \
+bash scripts/run_as_m4_stage.sh 12k-smoke
+```
+
+已验证结果：
+
+- `DEEPSPEED_CONFIG=none` 时，`finetune_m4.sh` 不传 `--deepspeed`；
+- `TORCHDYNAMO_DISABLE=1` 避免 DDPOptimizer higher-order op 编译失败；
+- `DDP_FIND_UNUSED_PARAMETERS=True` 允许 Stage A 尚未接入辅助 loss 的 event/offset/gate head 暂时无梯度；
+- 4 卡 `0,2,3,4` 的 AS-only 2-step smoke 已通过；
+- 同配置的 12k AS-only 20-step canary 已通过，`train_loss=0.19919465035200118`；
+- 同配置的 12k AS-only 150-step canary 已通过，`train_loss=0.1386900380253792`；
+- 同配置切换到 `MODEL_MAX_LENGTH=32000` 后，32k AS-only 20-step canary 已通过，`train_loss=0.19849497973918914`；
+- 同配置的 32k AS-only 150-step canary 已通过，`train_loss=0.0750156802435716`；
+- loss 非 NaN，`grad_norm` 非零，checkpoint 可保存；
+- `SAVE_STRATEGY=no` 时模型保存到 run 根目录，不生成 `checkpoint-*` 子目录；
+- 结束后 GPU 释放，未留下 `train_mem.py` 残留进程。
+
+已知失败路径：
+
+- 同样 AS-only smoke 在 `DEEPSPEED_CONFIG=scripts/zero3_lowmem.json` 下会在 ZeRO-3 参数 broadcast 阶段出现 collective size mismatch；
+- `DEEPSPEED_CONFIG=none` 但未禁用 TorchDynamo 时，会触发 DDPOptimizer higher-order op 错误。
+
+因此 Stage A 的 `20-step`、`150-step` canary 应先沿用 `DEEPSPEED_CONFIG=none + TORCHDYNAMO_DISABLE=1 + DDP_FIND_UNUSED_PARAMETERS=True`。完整 12k/32k 主训练若需要训练语言模型或 LoRA，再回到 `scripts/zero3_lowmem.json` 并重新执行 `2-step -> 20-step -> 150-step`。
+
 ### 32k OOM 保精度降级顺序
 
 如果 AS-M4 新增模块导致 32k OOM，必须优先牺牲时间来保精度。每次只改一个降级项，并重新跑 `2-step -> 20-step -> 150-step`。
@@ -1325,16 +1404,17 @@ L_total = L_lm
 3. 对 event detector、temporal aligner、confidence gate、fusion 和 projector 启用 activation checkpointing。
 4. 将 `M4_CHUNKED_LM_LOSS_TOKENS` 从 `512` 降到 `256`，仍 OOM 再降到 `128`；这不改变 loss 目标，只增加重算/循环时间。
 5. 将 micro batch 降到 1，并通过 `gradient_accumulation_steps` 保持有效 batch。
-6. 对音画 similarity matrix 使用分块计算，不缩短原定 offset 搜索范围。
+6. 对音画 similarity matrix 使用分块计算，完整保留原定 offset 搜索范围，只分块计算，不缩短候选。
 7. 减少训练中保留的诊断张量，只记录抽样统计，不保存全量 alignment matrix。
 8. 受控尝试 ZeRO-3 optimizer CPU offload；必须先确认系统内存并做 canary，避免再次触发系统 OOM killer。
-9. 以上仍失败时，才小幅缩短 `audio_history_sec` 或 `max_offset_sec`。
-10. 最后才考虑降低 LoRA rank 或冻结更多新增模块。
+9. 以上仍失败时，才缩短训练时的 `audio_history_sec`，并保留评测配置，记录训练/评测差异。
+10. 再失败时，才小幅减少对齐候选范围，并优先只作用于训练阶段。
+11. 最后才考虑降低 LoRA rank 或冻结更多 AS-M4 新增模块。
 
 不优先采用：
 
 - 不优先冻结 `lm_head`；
-- 不优先降低 `MODEL_MAX_LENGTH`；
+- 不优先降低 `MODEL_MAX_LENGTH=32000`；
 - 不优先减少视频 token、帧预算或有效场景音频信息；
 - 不优先关闭音频模块来让训练“通过”。
 
@@ -1400,6 +1480,52 @@ def paired_bootstrap(baseline, treatment, n_resamples=10000): ...
 def summarize_gate_behavior(records): ...
 def summarize_alignment_recovery(e5, e6): ...
 ```
+
+当前本地最小实现已落在：
+
+```text
+intersuit/intersuit/harness/runners/run_ablation_matrix.py
+intersuit/harness/configs/as_m4_e0_e7_smoke.json
+intersuit/tests/test_attribution_harness.py
+```
+
+它目前只负责 E0-E7 配置校验和 `matrix_plan.jsonl` 生成，不启动 GPU 推理。已通过：
+
+```bash
+/home/yjm/miniconda3/envs/M4/bin/python -m pytest -q intersuit/tests/test_attribution_harness.py
+
+PYTHONPATH=/home/yjm/M4-main/intersuit \
+/home/yjm/miniconda3/envs/M4/bin/python -m intersuit.harness.runners.run_ablation_matrix \
+  --config intersuit/harness/configs/as_m4_e0_e7_smoke.json \
+  --output_dir intersuit/harness/artifacts/as_m4_e0_e7_smoke \
+  --strict_paths
+```
+
+通过标准：`E0` 到 `E7` 顺序完整、同一 split / scorer / manifest、E5/E6 只差对齐开关、E1/E7 明确记录 `AS_M4_FORCE_AUDIO_GATE=0`、`summary.json` 中 `validation_errors=[]`。
+
+当前本地 scoring harness 已落在：
+
+```text
+intersuit/intersuit/harness/metrics/attribution_metrics.py
+intersuit/intersuit/harness/runners/score_ablation_matrix.py
+intersuit/tests/test_attribution_scoring.py
+```
+
+已通过：
+
+```bash
+/home/yjm/miniconda3/envs/M4/bin/python -m pytest -q \
+  intersuit/tests/test_attribution_harness.py \
+  intersuit/tests/test_attribution_scoring.py
+```
+
+并使用 synthetic prediction JSONL 完成一次 scoring dry-run，生成：
+
+```text
+intersuit/harness/artifacts/as_m4_e0_e7_smoke_score/score_summary.json
+```
+
+注意：synthetic prediction 只能证明评分管线可运行，不能作为性能提升证据。真实性能结论必须来自模型真实 prediction JSONL。
 
 ## 15.6 必报指标
 

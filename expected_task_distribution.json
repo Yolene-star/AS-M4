@@ -1,0 +1,289 @@
+{
+  "status": "PASS",
+  "selection_seed": 20260719,
+  "physical_media": {
+    "primary_physical_media_count": 550,
+    "avut_primary_count": 430,
+    "music_primary_count": 120,
+    "music_reserve_count": 200,
+    "cross_source_youtube_id_overlap": 0,
+    "primary_exclusion_id_hits": 0,
+    "avut_primary_exclusion_hash_hits": 0
+  },
+  "qa_distribution": {
+    "avut": {
+      "audio": 370,
+      "audio_visual": 672
+    },
+    "music": {
+      "audio": 223,
+      "audio_visual": 351,
+      "visual": 192
+    },
+    "total": {
+      "audio": 593,
+      "audio_visual": 1023,
+      "visual": 192
+    },
+    "total_qa": 1808,
+    "derived_media_count": 574
+  },
+  "source_inventory": {
+    "AVUT": {
+      "human_qa_count": 1734,
+      "human_video_count": 691,
+      "local_video_count": 243,
+      "candidate_count": 430,
+      "candidate_bytes": 6274058408,
+      "mapping_errors": [],
+      "exclusion_id_hits": 0,
+      "exclusion_hash_hits": 0
+    },
+    "MUSIC-AVQA-v2.0": {
+      "csv_row_count": 1040,
+      "qa_count": 42775,
+      "mapped_physical_candidate_count": 1000,
+      "all_three_modality_candidate_count": 664,
+      "mapping_errors": [],
+      "primary_count": 120,
+      "reserve_count": 200
+    }
+  },
+  "field_conversion_dry_run": {
+    "count": 20,
+    "errors": [],
+    "samples": [
+      {
+        "sample_id": "avut_0638",
+        "source_dataset": "AVUT",
+        "video_id": "214",
+        "youtube_id": "EA6h4omEXwg",
+        "video_path": "datasets/AVUT/train_videos/EA6h4omEXwg.mp4",
+        "scene_audio_path": "datasets/AVUT/train_videos/EA6h4omEXwg.mp4",
+        "question": "What is the dream of \"me\" in the song now?",
+        "answer": "B",
+        "task_type": "audio:Audio Information Extraction"
+      },
+      {
+        "sample_id": "avut_1105",
+        "source_dataset": "AVUT",
+        "video_id": "370",
+        "youtube_id": "Pcn0R5hXvzI",
+        "video_path": "datasets/AVUT/train_videos/Pcn0R5hXvzI.mp4",
+        "scene_audio_path": "datasets/AVUT/train_videos/Pcn0R5hXvzI.mp4",
+        "question": "How old was the speaker when he was in the band?",
+        "answer": "C",
+        "task_type": "audio:Audio Information Extraction"
+      },
+      {
+        "sample_id": "avut_1538",
+        "source_dataset": "AVUT",
+        "video_id": "514",
+        "youtube_id": "0su9g5yD-nY",
+        "video_path": "datasets/AVUT/train_videos/0su9g5yD-nY.mp4",
+        "scene_audio_path": "datasets/AVUT/train_videos/0su9g5yD-nY.mp4",
+        "question": "What does the speaker say when coins shown in the viseo?",
+        "answer": "A",
+        "task_type": "audio_visual:Audio OCR Matching"
+      },
+      {
+        "sample_id": "avut_1948",
+        "source_dataset": "AVUT",
+        "video_id": "651",
+        "youtube_id": "tUzvfceOrkw",
+        "video_path": "datasets/AVUT/train_videos/tUzvfceOrkw.mp4",
+        "scene_audio_path": "datasets/AVUT/train_videos/tUzvfceOrkw.mp4",
+        "question": "How many times does \"statement\" appear in the video in total?",
+        "answer": "C",
+        "task_type": "audio:Audio Content Counting"
+      },
+      {
+        "sample_id": "avut_1912",
+        "source_dataset": "AVUT",
+        "video_id": "639",
+        "youtube_id": "cN9WPoR5eLw",
+        "video_path": "datasets/AVUT/train_videos/cN9WPoR5eLw.mp4",
+        "scene_audio_path": "datasets/AVUT/train_videos/cN9WPoR5eLw.mp4",
+        "question": "How many times did the audience laugh in the video?",
+        "answer": "C",
+        "task_type": "audio:Audio Content Counting"
+      },
+      {
+        "sample_id": "avut_0646",
+        "source_dataset": "AVUT",
+        "video_id": "217",
+        "youtube_id": "csD-vScNN6k",
+        "video_path": "datasets/AVUT/train_videos/csD-vScNN6k.mp4",
+        "scene_audio_path": "datasets/AVUT/train_videos/csD-vScNN6k.mp4",
+        "question": "What does the person who says, \"that is pretty down low\" look like?",
+        "answer": "D",
+        "task_type": "audio_visual:Audio Character Matching"
+      },
+      {
+        "sample_id": "avut_1270",
+        "source_dataset": "AVUT",
+        "video_id": "425",
+        "youtube_id": "qhs5DTaOzHU",
+        "video_path": "datasets/AVUT/train_videos/qhs5DTaOzHU.mp4",
+        "scene_audio_path": "datasets/AVUT/train_videos/qhs5DTaOzHU.mp4",
+        "question": "At what point in the video can listen the voice of \"That's me\"?",
+        "answer": "B",
+        "task_type": "audio:Audio Event Location"
+      },
+      {
+        "sample_id": "avut_1165",
+        "source_dataset": "AVUT",
+        "video_id": "390",
+        "youtube_id": "YthQXn02RCk",
+        "video_path": "datasets/AVUT/train_videos/YthQXn02RCk.mp4",
+        "scene_audio_path": "datasets/AVUT/train_videos/YthQXn02RCk.mp4",
+        "question": "How many names are mentioned in the video in total?",
+        "answer": "C",
+        "task_type": "audio:Audio Content Counting"
+      },
+      {
+        "sample_id": "avut_1609",
+        "source_dataset": "AVUT",
+        "video_id": "538",
+        "youtube_id": "GzmZ9Q9nlho",
+        "video_path": "datasets/AVUT/train_videos/GzmZ9Q9nlho.mp4",
+        "scene_audio_path": "datasets/AVUT/train_videos/GzmZ9Q9nlho.mp4",
+        "question": "In the first example, what is the answer of the question?",
+        "answer": "A",
+        "task_type": "audio:Audio Information Extraction"
+      },
+      {
+        "sample_id": "avut_0913",
+        "source_dataset": "AVUT",
+        "video_id": "306",
+        "youtube_id": "CEZByd8Qzzg",
+        "video_path": "datasets/AVUT/train_videos/CEZByd8Qzzg.mp4",
+        "scene_audio_path": "datasets/AVUT/train_videos/CEZByd8Qzzg.mp4",
+        "question": "What is this girl introducing herself in the video?",
+        "answer": "B",
+        "task_type": "audio:Audio Information Extraction"
+      },
+      {
+        "sample_id": "music_avqa_v2_0Hi8jgH-6Mc_04167",
+        "source_dataset": "MUSIC-AVQA-v2.0",
+        "video_id": "0Hi8jgH-6Mc",
+        "youtube_id": "0Hi8jgH-6Mc",
+        "video_path": "datasets/MUSIC_AVQA_V2/videos/0Hi8jgH-6Mc.mp4",
+        "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/0Hi8jgH-6Mc.mp4",
+        "question": "Is there a erhu sound?",
+        "answer": "no",
+        "task_type": "audio:counting"
+      },
+      {
+        "sample_id": "music_avqa_v2_V__V_NQo_OI_07734",
+        "source_dataset": "MUSIC-AVQA-v2.0",
+        "video_id": "V__V_NQo_OI",
+        "youtube_id": "V__V_NQo_OI",
+        "video_path": "datasets/MUSIC_AVQA_V2/videos/V__V_NQo_OI.mp4",
+        "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/V__V_NQo_OI.mp4",
+        "question": "Is there a xylophone in the entire video?",
+        "answer": "no",
+        "task_type": "visual:counting"
+      },
+      {
+        "sample_id": "music_avqa_v2_gw7poB4hHG0_04759",
+        "source_dataset": "MUSIC-AVQA-v2.0",
+        "video_id": "gw7poB4hHG0",
+        "youtube_id": "gw7poB4hHG0",
+        "video_path": "datasets/MUSIC_AVQA_V2/videos/gw7poB4hHG0.mp4",
+        "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/gw7poB4hHG0.mp4",
+        "question": "Is there a suona sound?",
+        "answer": "no",
+        "task_type": "audio:counting"
+      },
+      {
+        "sample_id": "music_avqa_v2_-4N0dJSBmN4_13003",
+        "source_dataset": "MUSIC-AVQA-v2.0",
+        "video_id": "-4N0dJSBmN4",
+        "youtube_id": "-4N0dJSBmN4",
+        "video_path": "datasets/MUSIC_AVQA_V2/videos/-4N0dJSBmN4.mp4",
+        "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/-4N0dJSBmN4.mp4",
+        "question": "How many musical instruments were heard throughout the video?",
+        "answer": "eight",
+        "task_type": "audio:counting"
+      },
+      {
+        "sample_id": "music_avqa_v2_i0dgg8UJ1a8_00441",
+        "source_dataset": "MUSIC-AVQA-v2.0",
+        "video_id": "i0dgg8UJ1a8",
+        "youtube_id": "i0dgg8UJ1a8",
+        "video_path": "datasets/MUSIC_AVQA_V2/videos/i0dgg8UJ1a8.mp4",
+        "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/i0dgg8UJ1a8.mp4",
+        "question": "How many musical instruments were heard throughout the video?",
+        "answer": "four",
+        "task_type": "audio:counting"
+      },
+      {
+        "sample_id": "music_avqa_v2_3eO1h3Er3Eo_03977",
+        "source_dataset": "MUSIC-AVQA-v2.0",
+        "video_id": "3eO1h3Er3Eo",
+        "youtube_id": "3eO1h3Er3Eo",
+        "video_path": "datasets/MUSIC_AVQA_V2/videos/3eO1h3Er3Eo.mp4",
+        "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/3eO1h3Er3Eo.mp4",
+        "question": "Is there a bagpipe sound?",
+        "answer": "no",
+        "task_type": "audio:counting"
+      },
+      {
+        "sample_id": "music_avqa_v2_cSBRb4KF5xs_01512",
+        "source_dataset": "MUSIC-AVQA-v2.0",
+        "video_id": "cSBRb4KF5xs",
+        "youtube_id": "cSBRb4KF5xs",
+        "video_path": "datasets/MUSIC_AVQA_V2/videos/cSBRb4KF5xs.mp4",
+        "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/cSBRb4KF5xs.mp4",
+        "question": "Are there cello and tuba instruments in the video?",
+        "answer": "no",
+        "task_type": "visual:counting"
+      },
+      {
+        "sample_id": "music_avqa_v2_yN1SVVymtF0_02635",
+        "source_dataset": "MUSIC-AVQA-v2.0",
+        "video_id": "yN1SVVymtF0",
+        "youtube_id": "yN1SVVymtF0",
+        "video_path": "datasets/MUSIC_AVQA_V2/videos/yN1SVVymtF0.mp4",
+        "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/yN1SVVymtF0.mp4",
+        "question": "Which acoustic_guitar makes the sound first?",
+        "answer": "left",
+        "task_type": "audio_visual:temporal"
+      },
+      {
+        "sample_id": "music_avqa_v2_BywnzKojQvU_12324",
+        "source_dataset": "MUSIC-AVQA-v2.0",
+        "video_id": "BywnzKojQvU",
+        "youtube_id": "BywnzKojQvU",
+        "video_path": "datasets/MUSIC_AVQA_V2/videos/BywnzKojQvU.mp4",
+        "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/BywnzKojQvU.mp4",
+        "question": "Which violin makes the sound last?",
+        "answer": "right",
+        "task_type": "audio_visual:temporal"
+      },
+      {
+        "sample_id": "music_avqa_v2_TykormdgQCU_02814",
+        "source_dataset": "MUSIC-AVQA-v2.0",
+        "video_id": "TykormdgQCU",
+        "youtube_id": "TykormdgQCU",
+        "video_path": "datasets/MUSIC_AVQA_V2/videos/TykormdgQCU.mp4",
+        "scene_audio_path": "datasets/MUSIC_AVQA_V2/videos/TykormdgQCU.mp4",
+        "question": "How many instruments in the video did not sound from beginning to end?",
+        "answer": "four",
+        "task_type": "audio_visual:counting"
+      }
+    ]
+  },
+  "required_fields": [
+    "sample_id",
+    "source_dataset",
+    "video_id",
+    "youtube_id",
+    "video_path",
+    "scene_audio_path",
+    "question",
+    "answer",
+    "task_type"
+  ]
+}

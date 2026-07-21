@@ -108,6 +108,7 @@ class MatrixConfig:
     dataset_name: str
     split: str
     manifest: str
+    manifest_sha256: str | None
     scorer: str
     baseline_model: str
     as_m4_model: str
@@ -147,6 +148,7 @@ def parse_config(data: dict[str, Any]) -> MatrixConfig:
         dataset_name=str(dataset["name"]),
         split=str(dataset["split"]),
         manifest=str(dataset["manifest"]),
+        manifest_sha256=str(dataset["manifest_sha256"]) if dataset.get("manifest_sha256") else None,
         scorer=str(dataset["scorer"]),
         baseline_model=str(models["baseline_m4"]),
         as_m4_model=str(models["as_m4"]),
@@ -214,6 +216,8 @@ def build_plan(config: MatrixConfig) -> list[dict[str, Any]]:
             "AS_M4_FUSION_INIT": str(exp.get("fusion_init") or "zero"),
             "AS_M4_GATE_LOGIT_BIAS": str(exp.get("gate_logit_bias") if exp.get("gate_logit_bias") is not None else -5.0),
         }
+        for key, value in (exp.get("env") or {}).items():
+            env.setdefault(str(key), str(value))
         if exp.get("force_audio_gate") is not None:
             env["AS_M4_FORCE_AUDIO_GATE"] = str(exp["force_audio_gate"])
         records.append(
@@ -223,6 +227,7 @@ def build_plan(config: MatrixConfig) -> list[dict[str, Any]]:
                 "dataset": config.dataset_name,
                 "split": config.split,
                 "manifest": config.manifest,
+                "manifest_sha256": config.manifest_sha256,
                 "scorer": config.scorer,
                 "model_key": model_key,
                 "model_path": model_paths.get(model_key, model_key),

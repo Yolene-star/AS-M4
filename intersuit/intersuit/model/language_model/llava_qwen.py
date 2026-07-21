@@ -87,6 +87,37 @@ class LlavaQwenConfig(Qwen2Config):
     model_type = "llava_qwen"
 
 
+def scene_audio_semantic_ranking_loss(
+    positive_features: torch.Tensor,
+    positive_mask: torch.Tensor,
+    negative_features: torch.Tensor,
+    negative_mask: torch.Tensor,
+    target_features: torch.Tensor,
+    target_mask: torch.Tensor,
+    margin: float,
+) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    def masked_pool(features, mask):
+        mask = mask.to(device=features.device, dtype=features.dtype).unsqueeze(-1)
+        return (features * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1.0)
+
+    positive_pool = masked_pool(positive_features, positive_mask)
+    negative_pool = masked_pool(negative_features, negative_mask)
+    target_pool = masked_pool(target_features, target_mask)
+    valid = target_mask.any(dim=1) & positive_mask.any(dim=1) & negative_mask.any(dim=1)
+    if not valid.any():
+        zero = positive_pool.sum() * 0.0
+        return zero, {"loss": zero.detach(), "valid_count": valid.detach().sum()}
+    positive_similarity = F.cosine_similarity(positive_pool[valid].float(), target_pool[valid].float())
+    negative_similarity = F.cosine_similarity(negative_pool[valid].float(), target_pool[valid].float())
+    ranking = F.relu(float(margin) - positive_similarity + negative_similarity).mean()
+    return ranking.to(dtype=positive_pool.dtype), {
+        "loss": ranking.detach(),
+        "positive_similarity": positive_similarity.detach().mean(),
+        "negative_similarity": negative_similarity.detach().mean(),
+        "valid_count": valid.detach().sum(),
+    }
+
+
 class LlavaQwenModel(LlavaMetaModel, Qwen2Model):
     config_class = LlavaQwenConfig
 
@@ -198,10 +229,15 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
         scene_audios: Optional[torch.FloatTensor] = None,
         scene_audio_mask: Optional[torch.Tensor] = None,
         scene_audio_timestamps: Optional[torch.Tensor] = None,
+        scene_audio_negatives: Optional[torch.FloatTensor] = None,
+        scene_audio_negative_mask: Optional[torch.Tensor] = None,
+        scene_audio_negative_timestamps: Optional[torch.Tensor] = None,
         frame_timestamps: Optional[torch.Tensor] = None,
         cache_position=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
 
+        semantic_labels = labels
+        contrastive_loss = None
         if inputs_embeds is None:
             if scene_audios is not None:
                 (input_ids, position_ids, attention_mask, past_key_values, inputs_embeds, labels) = self.prepare_inputs_labels_for_streaming_av(
@@ -219,6 +255,12 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
                     scene_audio_mask=scene_audio_mask,
                     scene_audio_timestamps=scene_audio_timestamps,
                     frame_timestamps=frame_timestamps,
+                )
+                contrastive_loss = self._scene_audio_contrastive_loss(
+                    semantic_labels,
+                    scene_audio_negatives,
+                    scene_audio_negative_mask,
+                    scene_audio_negative_timestamps,
                 )
             elif speeches is None:
                 (input_ids, position_ids, attention_mask, past_key_values, inputs_embeds, labels) = self.prepare_inputs_labels_for_multimodal(input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities, image_sizes)
@@ -257,6 +299,8 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
             )
 
             loss = self._chunked_lm_loss(outputs.last_hidden_state, labels)
+            if contrastive_loss is not None:
+                loss = loss + contrastive_loss
             if not return_dict:
                 output = (None, outputs.past_key_values, outputs.hidden_states, outputs.attentions)
                 return (loss,) + output
@@ -270,7 +314,7 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
             )
 
         else:
-            return super().forward(
+            result = super().forward(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 position_ids=position_ids,
@@ -282,6 +326,47 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
             )
+            if contrastive_loss is not None:
+                if not getattr(result, "loss", None) is None:
+                    result.loss = result.loss + contrastive_loss
+                elif isinstance(result, tuple) and result:
+                    result = (result[0] + contrastive_loss,) + result[1:]
+            return result
+
+    def _scene_audio_contrastive_loss(
+        self,
+        labels: Optional[torch.LongTensor],
+        negatives: Optional[torch.FloatTensor],
+        negative_mask: Optional[torch.Tensor],
+        negative_timestamps: Optional[torch.Tensor],
+    ) -> Optional[torch.Tensor]:
+        weight = float(getattr(self.config, "scene_audio_contrastive_weight", 0.0))
+        if not self.training or weight <= 0.0 or labels is None or negatives is None:
+            return None
+        positive = getattr(self, "_last_scene_audio_output", None)
+        if positive is None:
+            return None
+        negative = self.encode_scene_audio(
+            negatives,
+            scene_audio_mask=negative_mask,
+            scene_audio_timestamps=negative_timestamps,
+        )
+
+        label_mask = labels.ne(IGNORE_INDEX)
+        safe_labels = labels.masked_fill(~label_mask, 0)
+        target_tokens = self.get_model().embed_tokens(safe_labels).detach()
+        margin = float(getattr(self.config, "scene_audio_contrastive_margin", 0.2))
+        ranking, diagnostics = scene_audio_semantic_ranking_loss(
+            positive.features,
+            positive.mask,
+            negative.features,
+            negative.mask,
+            target_tokens,
+            label_mask,
+            margin,
+        )
+        self._last_scene_audio_contrastive_diagnostics = diagnostics
+        return ranking * weight
 
     @torch.no_grad()
     def generate(

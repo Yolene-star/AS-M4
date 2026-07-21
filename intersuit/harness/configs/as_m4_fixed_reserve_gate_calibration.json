@@ -1,0 +1,87 @@
+{
+  "dataset": {
+    "name": "AS_M4_STAGE2",
+    "split": "reserve326_fixed_gate_calibration",
+    "manifest": "/home/yjm/M4-main/intersuit/datasets/AS_M4_STAGE2/reserve_manifest.json",
+    "manifest_sha256": "e7ad0ca5a5c8438a2a81e908a7567a5633351fb4f2ae77d074745d6c8ea9a1f0",
+    "scorer": "label_terms"
+  },
+  "models": {
+    "baseline_m4": "/home/yjm/M4-main/intersuit/checkpoints/M4-LongVA-7B-Qwen2-train-12k-lowmem-nofreeze",
+    "as_m4": "/home/yjm/M4-main/intersuit/checkpoints/AS-M4-BEATs-fixed-stage2-full-v1-20260720"
+  },
+  "output_root": "/home/yjm/M4-main/intersuit/harness/artifacts/as_m4_beats_fixed_reserve326_gate_calibration/predictions",
+  "experiment_ids": [
+    "RESERVE_VIDEO_ONLY",
+    "RESERVE_G010_CORRECT",
+    "RESERVE_G010_MISMATCHED",
+    "RESERVE_G005_CORRECT",
+    "RESERVE_G005_MISMATCHED",
+    "RESERVE_G002_CORRECT",
+    "RESERVE_G002_MISMATCHED"
+  ],
+  "experiments": [
+    {
+      "id": "RESERVE_VIDEO_ONLY",
+      "model_key": "baseline_m4",
+      "audio_condition": "none",
+      "rollback_mode": "weights12k",
+      "alignment": "off",
+      "gate_ablation": "none"
+    },
+    {
+      "id": "RESERVE_G010_CORRECT",
+      "model_key": "as_m4",
+      "audio_condition": "correct",
+      "rollback_mode": "none",
+      "alignment": "off",
+      "gate_ablation": "none",
+      "env": {"AS_M4_INFERENCE_SIMPLE_AUDIO_GATE": "0.10"}
+    },
+    {
+      "id": "RESERVE_G010_MISMATCHED",
+      "model_key": "as_m4",
+      "audio_condition": "mismatched",
+      "rollback_mode": "none",
+      "alignment": "off",
+      "gate_ablation": "none",
+      "env": {"AS_M4_INFERENCE_SIMPLE_AUDIO_GATE": "0.10"}
+    },
+    {
+      "id": "RESERVE_G005_CORRECT",
+      "model_key": "as_m4",
+      "audio_condition": "correct",
+      "rollback_mode": "none",
+      "alignment": "off",
+      "gate_ablation": "none",
+      "env": {"AS_M4_INFERENCE_SIMPLE_AUDIO_GATE": "0.05"}
+    },
+    {
+      "id": "RESERVE_G005_MISMATCHED",
+      "model_key": "as_m4",
+      "audio_condition": "mismatched",
+      "rollback_mode": "none",
+      "alignment": "off",
+      "gate_ablation": "none",
+      "env": {"AS_M4_INFERENCE_SIMPLE_AUDIO_GATE": "0.05"}
+    },
+    {
+      "id": "RESERVE_G002_CORRECT",
+      "model_key": "as_m4",
+      "audio_condition": "correct",
+      "rollback_mode": "none",
+      "alignment": "off",
+      "gate_ablation": "none",
+      "env": {"AS_M4_INFERENCE_SIMPLE_AUDIO_GATE": "0.02"}
+    },
+    {
+      "id": "RESERVE_G002_MISMATCHED",
+      "model_key": "as_m4",
+      "audio_condition": "mismatched",
+      "rollback_mode": "none",
+      "alignment": "off",
+      "gate_ablation": "none",
+      "env": {"AS_M4_INFERENCE_SIMPLE_AUDIO_GATE": "0.02"}
+    }
+  ]
+}

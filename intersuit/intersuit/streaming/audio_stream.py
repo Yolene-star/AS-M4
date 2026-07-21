@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import math
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -54,23 +53,58 @@ def load_scene_audio(
 
     suffix = path.suffix.lower()
     if suffix in {".wav", ".flac", ".mp3", ".ogg", ".m4a"}:
-        waveform, source_rate = torchaudio.load(str(path))
-    else:
-        with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+        try:
+            waveform, source_rate = torchaudio.load(str(path))
+        except (RuntimeError, OSError):
+            # Some CPU environments ship torchaudio without an IO backend.
+            # Keep scene-audio loading functional through the same ffmpeg path
+            # used for video containers.
+            channels = 1 if mono else 2
             command = [
-                "ffmpeg",
-                "-y",
-                "-i",
-                str(path),
-                "-vn",
-                "-ac",
-                "1" if mono else "2",
-                "-ar",
-                str(sample_rate),
-                tmp.name,
+                "ffmpeg", "-v", "error", "-i", str(path), "-vn",
+                "-ac", str(channels), "-ar", str(sample_rate),
+                "-acodec", "pcm_f32le", "-f", "f32le", "pipe:1",
             ]
-            subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-            waveform, source_rate = torchaudio.load(tmp.name)
+            decoded = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            if decoded.returncode != 0 or not decoded.stdout:
+                raise RuntimeError(
+                    f"ffmpeg scene-audio decode failed for {path}: "
+                    f"{decoded.stderr.decode(errors='replace').strip()}"
+                )
+            waveform = torch.frombuffer(bytearray(decoded.stdout), dtype=torch.float32).clone()
+            if channels > 1:
+                waveform = waveform.reshape(-1, channels).transpose(0, 1).contiguous()
+            source_rate = sample_rate
+    else:
+        channels = 1 if mono else 2
+        command = [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-vn",
+            "-ac",
+            str(channels),
+            "-ar",
+            str(sample_rate),
+            "-acodec",
+            "pcm_f32le",
+            "-f",
+            "f32le",
+            "pipe:1",
+        ]
+        decoded = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        if decoded.returncode != 0:
+            raise RuntimeError(f"ffmpeg scene-audio decode failed for {path}: {decoded.stderr.decode(errors='replace').strip()}")
+        if not decoded.stdout:
+            raise ValueError(f"ffmpeg decoded empty scene audio from {path}")
+        waveform = torch.frombuffer(bytearray(decoded.stdout), dtype=torch.float32).clone()
+        if channels > 1:
+            if waveform.numel() % channels:
+                raise ValueError(f"Decoded PCM sample count is not divisible by channels for {path}")
+            waveform = waveform.reshape(-1, channels).transpose(0, 1).contiguous()
+        source_rate = sample_rate
 
     if source_rate != sample_rate:
         waveform = torchaudio.functional.resample(waveform, source_rate, sample_rate)
@@ -144,4 +178,3 @@ def stack_audio_windows(windows: list[AudioWindow]) -> tuple[torch.Tensor, torch
         dtype=torch.float32,
     )
     return samples, timestamps
-

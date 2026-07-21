@@ -1,0 +1,333 @@
+"""CPU tests for diagnostic-only local audio event alignment."""
+
+from __future__ import annotations
+
+import pytest
+import torch
+
+from intersuit.model.streaming_av.audio_event_aligner import (
+    FrozenOffsetScorerInputs,
+    FrozenTemporalOffsetScorer,
+    LocalAudioEventAligner,
+    compute_audio_event_features,
+)
+
+
+def _timestamps(steps: int) -> torch.Tensor:
+    return torch.arange(steps, dtype=torch.float32) * 0.5
+
+
+def test_silent_window_event_strength_is_zero():
+    features = compute_audio_event_features(torch.zeros(1, 3, 160))
+
+    assert torch.equal(features.event_strength, torch.zeros_like(features.event_strength))
+    assert features.is_silent_window.all()
+    assert torch.equal(features.audio_rms, torch.zeros_like(features.audio_rms))
+    assert torch.equal(features.audio_peak, torch.zeros_like(features.audio_peak))
+
+
+def test_sound_event_strength_exceeds_silence():
+    windows = torch.zeros(1, 2, 160)
+    windows[:, 1] = 0.1
+
+    features = compute_audio_event_features(windows)
+
+    assert features.event_strength[0, 1] > features.event_strength[0, 0]
+    assert features.audio_rms[0, 1] > features.audio_rms[0, 0]
+    assert features.audio_peak[0, 1] > features.audio_peak[0, 0]
+
+
+def test_three_offsets_and_boundary_candidates_are_correct():
+    aligner = LocalAudioEventAligner(hidden_size=5)
+    audio = torch.eye(5).unsqueeze(0)
+    video = audio.unsqueeze(2)
+    times = _timestamps(5)
+    events = compute_audio_event_features(torch.ones(1, 5, 80) * 0.1, audio_features=audio)
+
+    output = aligner(audio, video, times, times, events)
+
+    assert torch.equal(output.candidate_offsets[0, 2], torch.tensor([-0.5, 0.0, 0.5]))
+    assert output.candidate_valid[0, 0].tolist() == [True, True, False]
+    assert output.candidate_valid[0, -1].tolist() == [False, True, True]
+    assert output.candidate_indices.min() >= 0
+    assert output.candidate_indices.max() < audio.shape[1]
+
+
+def test_single_valid_candidate_has_zero_margin():
+    aligner = LocalAudioEventAligner(hidden_size=4)
+    audio = torch.ones(1, 1, 4)
+    video = audio.unsqueeze(2)
+    times = torch.tensor([0.0])
+    events = compute_audio_event_features(torch.ones(1, 1, 80) * 0.1, audio_features=audio)
+
+    output = aligner(audio, video, times, times, events)
+
+    assert output.candidate_valid[0, 0].tolist() == [False, True, False]
+    assert output.alignment_margin[0, 0].item() == 0.0
+
+
+def test_best_offset_and_alignment_margin_select_matching_window():
+    aligner = LocalAudioEventAligner(hidden_size=5, semantic_feature_mode="shared_precomputed")
+    audio = torch.eye(5).unsqueeze(0)
+    video = audio[:, 3:4].unsqueeze(2)
+    audio_times = _timestamps(5)
+    video_times = torch.tensor([1.0])
+    events = compute_audio_event_features(torch.ones(1, 5, 80) * 0.1, audio_features=audio)
+
+    output = aligner(audio, video, audio_times, video_times, events)
+
+    assert output.best_offset.item() == -0.5
+    assert output.best_alignment_score.item() > output.second_best_alignment_score.item()
+    assert torch.allclose(
+        output.alignment_margin,
+        output.best_alignment_score - output.second_best_alignment_score,
+    )
+    assert output.alignment_confidence.item() > 0.0
+
+
+def test_semantic_similarity_dominates_event_strength():
+    aligner = LocalAudioEventAligner(
+        hidden_size=4,
+        event_strength_weight=0.05,
+        semantic_feature_mode="shared_precomputed",
+    )
+    audio = torch.tensor([[[0.0, 1.0, -1.0, 0.0], [1.0, -1.0, 0.0, 0.0], [0.0, 1.0, -1.0, 0.0]]])
+    video = audio[:, 1:2].unsqueeze(2)
+    audio_times = _timestamps(3)
+    video_times = torch.tensor([0.5])
+    events = compute_audio_event_features(torch.ones(1, 3, 80) * 0.1, audio_features=audio)
+    events = events._replace(event_strength=torch.tensor([[1.0, 0.1, 1.0]]))
+
+    output = aligner(audio, video, audio_times, video_times, events)
+
+    assert output.best_offset.item() == 0.0
+    assert output.semantic_similarity[0, 0, 1] > output.semantic_similarity[0, 0, 0]
+    assert output.semantic_similarity[0, 0, 1] > output.semantic_similarity[0, 0, 2]
+
+
+def test_silent_candidates_have_zero_score_margin_and_confidence():
+    aligner = LocalAudioEventAligner(hidden_size=4)
+    audio = torch.randn(1, 3, 4)
+    video = torch.randn(1, 3, 1, 4)
+    times = _timestamps(3)
+    events = compute_audio_event_features(torch.zeros(1, 3, 80), audio_features=audio)
+
+    output = aligner(audio, video, times, times, events)
+
+    assert torch.equal(output.candidate_scores, torch.zeros_like(output.candidate_scores))
+    assert torch.equal(output.alignment_margin, torch.zeros_like(output.alignment_margin))
+    assert torch.equal(output.alignment_confidence, torch.zeros_like(output.alignment_confidence))
+
+
+def test_bf16_inputs_are_finite():
+    aligner = LocalAudioEventAligner(hidden_size=4)
+    audio = torch.randn(1, 3, 4, dtype=torch.bfloat16)
+    video = torch.randn(1, 3, 2, 4, dtype=torch.bfloat16)
+    windows = torch.randn(1, 3, 80, dtype=torch.bfloat16) * 0.05
+    times = _timestamps(3)
+    events = compute_audio_event_features(windows, audio_features=audio)
+
+    output = aligner(audio, video, times, times, events)
+
+    for value in (*events[:-1], *output):
+        if torch.is_tensor(value) and value.is_floating_point():
+            assert torch.isfinite(value).all()
+
+
+def test_nan_and_inf_inputs_are_sanitized():
+    aligner = LocalAudioEventAligner(hidden_size=2)
+    audio = torch.tensor([[[float("nan"), 0.0], [float("inf"), 1.0], [1.0, 0.0]]])
+    video = torch.ones(1, 3, 1, 2)
+    windows = torch.tensor([[[float("nan"), 0.0], [float("inf"), 0.0], [0.1, -0.1]]])
+    times = _timestamps(3)
+    events = compute_audio_event_features(windows, audio_features=audio)
+
+    output = aligner(audio, video, times, times, events)
+
+    for value in (*events[:-1], *output):
+        if torch.is_tensor(value) and value.is_floating_point():
+            assert torch.isfinite(value).all()
+
+
+def test_default_mode_does_not_use_untrained_projectors_for_semantics():
+    aligner = LocalAudioEventAligner(hidden_size=4)
+    audio = torch.randn(1, 3, 4)
+    video = torch.randn(1, 3, 1, 4)
+    times = _timestamps(3)
+    events = compute_audio_event_features(torch.ones(1, 3, 80) * 0.1, audio_features=audio)
+
+    output = aligner(audio, video, times, times, events)
+
+    assert aligner.audio_proj is None
+    assert aligner.video_proj is None
+    assert torch.equal(output.semantic_similarity, torch.zeros_like(output.semantic_similarity))
+
+
+def test_invalid_semantic_mode_rejects_untrained_projection_path():
+    with pytest.raises(ValueError, match="random or untrained projectors are not allowed"):
+        LocalAudioEventAligner(hidden_size=4, semantic_feature_mode="random_projection")
+
+
+def test_projector_checkpoint_enables_semantic_scoring(tmp_path):
+    checkpoint = tmp_path / "projectors.pt"
+    torch.save(
+        {
+            "audio_proj.weight": torch.eye(3, 4),
+            "video_proj.weight": torch.eye(3, 4),
+        },
+        checkpoint,
+    )
+    aligner = LocalAudioEventAligner(
+        hidden_size=4,
+        projector_checkpoint_path=str(checkpoint),
+        event_strength_weight=0.0,
+    )
+    audio = torch.tensor([[[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]]])
+    video = audio[:, 1:2].unsqueeze(2)
+    audio_times = _timestamps(3)
+    video_times = torch.tensor([0.5])
+    events = compute_audio_event_features(torch.ones(1, 3, 80) * 0.1, audio_features=audio)
+
+    output = aligner(audio, video, audio_times, video_times, events)
+
+    assert aligner.semantic_feature_mode == "checkpoint_loaded"
+    assert all(not param.requires_grad for param in aligner.audio_proj.parameters())
+    assert output.best_offset.item() == 0.0
+    assert output.semantic_similarity[0, 0, 1] > output.semantic_similarity[0, 0, 0]
+
+
+def test_missing_projector_checkpoint_has_clear_error(tmp_path):
+    missing = tmp_path / "missing.pt"
+
+    with pytest.raises(FileNotFoundError, match="trained checkpoint"):
+        LocalAudioEventAligner(hidden_size=4, projector_checkpoint_path=str(missing))
+
+
+def _frozen_offset_bundle(tmp_path, margin_threshold=0.15):
+    radius = 1
+    audio_dim, clip_dim, rgb_dim = 2, 3, 2
+    context_count = radius * 2 + 1
+    scalar_dim = context_count * 6 + 7
+    pair_dim = context_count * audio_dim * 2 + context_count * (clip_dim + rgb_dim) * 2 + scalar_dim
+    hidden_dim = 4
+    first_weight = torch.zeros(hidden_dim, pair_dim)
+    scalar_start = context_count * audio_dim * 2 + context_count * (clip_dim + rgb_dim) * 2
+    first_weight[0, scalar_start + scalar_dim - 7] = 1.0
+    path = tmp_path / "offset_runtime_bundle.pt"
+    torch.save(
+        {
+            "format_version": 1,
+            "state_dict": {
+                "net.0.weight": first_weight,
+                "net.0.bias": torch.zeros(hidden_dim),
+                "net.2.weight": torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+                "net.2.bias": torch.zeros(1),
+            },
+            "scalar_mean": torch.zeros(scalar_dim),
+            "scalar_std": torch.ones(scalar_dim),
+            "metadata": {
+                "audio_dim": audio_dim,
+                "clip_dim": clip_dim,
+                "rgb_dim": rgb_dim,
+                "context_radius": radius,
+                "scalar_dim": scalar_dim,
+                "hidden_dim": hidden_dim,
+                "candidate_offsets": [-0.5, 0.0, 0.5],
+                "seed": 20260719,
+                "margin_threshold": margin_threshold,
+                "zero_class_weight": 1.25,
+                "require_center_peak": True,
+            },
+        },
+        path,
+    )
+    return path, margin_threshold
+
+
+def _frozen_inputs():
+    return FrozenOffsetScorerInputs(
+        audio_features=torch.randn(1, 5, 2),
+        clip_features=torch.randn(1, 5, 3),
+        rgb_features=torch.randn(1, 5, 2),
+        audio_rms=torch.linspace(0.1, 0.5, 5).unsqueeze(0),
+        non_silent_ratio=torch.ones(1, 5),
+    )
+
+
+def test_frozen_offset_scorer_emits_scores_acceptance_and_suggestion(tmp_path):
+    bundle, threshold = _frozen_offset_bundle(tmp_path)
+    aligner = LocalAudioEventAligner(
+        hidden_size=4,
+        offset_scorer_bundle_path=str(bundle),
+        offset_scorer_margin_threshold=threshold,
+    )
+    audio = torch.randn(1, 3, 4)
+    video = torch.randn(1, 3, 1, 4)
+    times = _timestamps(3)
+    events = compute_audio_event_features(torch.ones(1, 3, 80) * 0.1, audio_features=audio)
+
+    output = aligner(
+        audio,
+        video,
+        times,
+        times,
+        events,
+        frozen_offset_inputs=_frozen_inputs(),
+    )
+
+    assert output.offset_scorer_candidate_scores.shape == (1, 5, 3)
+    assert output.offset_scorer_available.all()
+    assert output.offset_scorer_best_offset[0, 2].item() == 0.5
+    assert output.offset_scorer_margin[0, 2].item() == pytest.approx(0.5)
+    assert output.offset_scorer_accepted[0, 2].item() is True
+    assert output.offset_scorer_suggested_offset[0, 2].item() == 0.5
+
+
+def test_frozen_offset_scorer_exposes_exact_candidate_hidden_features(tmp_path):
+    bundle, threshold = _frozen_offset_bundle(tmp_path)
+    scorer = FrozenTemporalOffsetScorer(bundle, margin_threshold=threshold)
+
+    output = scorer(_frozen_inputs())
+    reconstructed = scorer.net[2](output.candidate_features).squeeze(-1)
+    valid = torch.ones_like(output.candidate_scores, dtype=torch.bool)
+    valid[:, 0, 0] = False
+    valid[:, -1, 2] = False
+
+    assert output.candidate_features.shape == (1, 5, 3, 4)
+    assert torch.equal(
+        reconstructed.masked_fill(~valid, 0.0),
+        output.candidate_scores,
+    )
+
+
+def test_frozen_offset_scorer_missing_exact_inputs_fails_closed(tmp_path):
+    bundle, threshold = _frozen_offset_bundle(tmp_path)
+    aligner = LocalAudioEventAligner(
+        hidden_size=4,
+        offset_scorer_bundle_path=str(bundle),
+        offset_scorer_margin_threshold=threshold,
+    )
+    audio = torch.randn(1, 3, 4)
+    video = torch.randn(1, 3, 1, 4)
+    times = _timestamps(3)
+    events = compute_audio_event_features(torch.ones(1, 3, 80) * 0.1, audio_features=audio)
+
+    output = aligner(audio, video, times, times, events)
+
+    assert not output.offset_scorer_available.any()
+    assert not output.offset_scorer_accepted.any()
+    assert torch.equal(
+        output.offset_scorer_suggested_offset,
+        torch.zeros_like(output.offset_scorer_suggested_offset),
+    )
+
+
+def test_frozen_offset_scorer_rejects_threshold_change(tmp_path):
+    bundle, _ = _frozen_offset_bundle(tmp_path, margin_threshold=0.15)
+
+    with pytest.raises(ValueError, match="threshold is locked"):
+        LocalAudioEventAligner(
+            hidden_size=4,
+            offset_scorer_bundle_path=str(bundle),
+            offset_scorer_margin_threshold=0.2,
+        )

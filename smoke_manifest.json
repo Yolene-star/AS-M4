@@ -1,0 +1,600 @@
+[
+  {
+    "answer": "B",
+    "audio_sha256": "ed0e186eae73d53fc5fb8b956aa7f7e413f820eb5746e06b1e5fb9d914d6f2a1",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nWhat is the dream of \"me\" in the song now?\nA. Dream \"me\" dreams come true\nB. Dream \"you\" dreams come true\nC. Dream \"my\" family's dream come true\nD. Dreams \"my\" friend's dreams come true"
+      },
+      {
+        "from": "gpt",
+        "value": "B"
+      }
+    ],
+    "id": "avut_638",
+    "media_sha256": "4bdb36e8dec8b3655b5e95ae0619c759e5c24568075c7ebb45e991cc1a538a47",
+    "question": "What is the dream of \"me\" in the song now?",
+    "sample_id": "avut_638",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/AVUT/EA6h4omEXwg.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "AVUT",
+    "source_revision": "558ca95ac16c972a4de2028fbecef2a8b82fdb00",
+    "task_type": "audio:Audio Information Extraction",
+    "video_id": "214",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/AVUT/EA6h4omEXwg.mp4",
+    "youtube_id": "EA6h4omEXwg"
+  },
+  {
+    "answer": "C",
+    "audio_sha256": "869ca1ddf5f47f6bec936dad995dc4392a707a3119112bc2c4e3bb6f63aab6ed",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nHow old was the speaker when he was in the band?\nA. 10s\nB. 15s\nC. 20s\nD. 25s"
+      },
+      {
+        "from": "gpt",
+        "value": "C"
+      }
+    ],
+    "id": "avut_1105",
+    "media_sha256": "f9191c9d7d34d21952a470b202b66f54480ccf8b3108665e45336bba1f1f0679",
+    "question": "How old was the speaker when he was in the band?",
+    "sample_id": "avut_1105",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/AVUT/Pcn0R5hXvzI.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "AVUT",
+    "source_revision": "558ca95ac16c972a4de2028fbecef2a8b82fdb00",
+    "task_type": "audio:Audio Information Extraction",
+    "video_id": "370",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/AVUT/Pcn0R5hXvzI.mp4",
+    "youtube_id": "Pcn0R5hXvzI"
+  },
+  {
+    "answer": "B",
+    "audio_sha256": "869ca1ddf5f47f6bec936dad995dc4392a707a3119112bc2c4e3bb6f63aab6ed",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nWhen the first speaker says \"yeah\", what color is the background of the second speaker?\nA. Black\nB. Dark blue\nC. Dark purple\nD. Dark green"
+      },
+      {
+        "from": "gpt",
+        "value": "B"
+      }
+    ],
+    "id": "avut_1107",
+    "media_sha256": "f9191c9d7d34d21952a470b202b66f54480ccf8b3108665e45336bba1f1f0679",
+    "question": "When the first speaker says \"yeah\", what color is the background of the second speaker?",
+    "sample_id": "avut_1107",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/AVUT/Pcn0R5hXvzI.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "AVUT",
+    "source_revision": "558ca95ac16c972a4de2028fbecef2a8b82fdb00",
+    "task_type": "audio_visual:Audio Object Matching",
+    "video_id": "370",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/AVUT/Pcn0R5hXvzI.mp4",
+    "youtube_id": "Pcn0R5hXvzI"
+  },
+  {
+    "answer": "no",
+    "audio_sha256": "fdcc6ff224ba921b4e97a4e39e87bb61b30c3c74eabb8f96e8f49ad65dee9599",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nIs there a erhu sound?"
+      },
+      {
+        "from": "gpt",
+        "value": "no"
+      }
+    ],
+    "id": "music_0Hi8jgH-6Mc_004167",
+    "media_sha256": "0710b2078743d61c0c8b3260fb9954d66bc3fe8a8d087cc1fa523284fbca46d8",
+    "question": "Is there a erhu sound?",
+    "sample_id": "music_0Hi8jgH-6Mc_004167",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/0Hi8jgH-6Mc.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio:Counting",
+    "video_id": "0Hi8jgH-6Mc",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/0Hi8jgH-6Mc.mp4",
+    "youtube_id": "0Hi8jgH-6Mc"
+  },
+  {
+    "answer": "no",
+    "audio_sha256": "fdcc6ff224ba921b4e97a4e39e87bb61b30c3c74eabb8f96e8f49ad65dee9599",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nIs there a erhu in the entire video?"
+      },
+      {
+        "from": "gpt",
+        "value": "no"
+      }
+    ],
+    "id": "music_0Hi8jgH-6Mc_005692",
+    "media_sha256": "0710b2078743d61c0c8b3260fb9954d66bc3fe8a8d087cc1fa523284fbca46d8",
+    "question": "Is there a erhu in the entire video?",
+    "sample_id": "music_0Hi8jgH-6Mc_005692",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/0Hi8jgH-6Mc.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "visual:Counting",
+    "video_id": "0Hi8jgH-6Mc",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/0Hi8jgH-6Mc.mp4",
+    "youtube_id": "0Hi8jgH-6Mc"
+  },
+  {
+    "answer": "three",
+    "audio_sha256": "fdcc6ff224ba921b4e97a4e39e87bb61b30c3c74eabb8f96e8f49ad65dee9599",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nHow many sounding violin in the video？"
+      },
+      {
+        "from": "gpt",
+        "value": "three"
+      }
+    ],
+    "id": "music_0Hi8jgH-6Mc_014006",
+    "media_sha256": "0710b2078743d61c0c8b3260fb9954d66bc3fe8a8d087cc1fa523284fbca46d8",
+    "question": "How many sounding violin in the video？",
+    "sample_id": "music_0Hi8jgH-6Mc_014006",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/0Hi8jgH-6Mc.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio_visual:Counting",
+    "video_id": "0Hi8jgH-6Mc",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/0Hi8jgH-6Mc.mp4",
+    "youtube_id": "0Hi8jgH-6Mc"
+  },
+  {
+    "answer": "no",
+    "audio_sha256": "fdcc6ff224ba921b4e97a4e39e87bb61b30c3c74eabb8f96e8f49ad65dee9599",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nAre there violin and bassoon sound? "
+      },
+      {
+        "from": "gpt",
+        "value": "no"
+      }
+    ],
+    "id": "music_0Hi8jgH-6Mc_017739",
+    "media_sha256": "0710b2078743d61c0c8b3260fb9954d66bc3fe8a8d087cc1fa523284fbca46d8",
+    "question": "Are there violin and bassoon sound? ",
+    "sample_id": "music_0Hi8jgH-6Mc_017739",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/0Hi8jgH-6Mc.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio:Counting",
+    "video_id": "0Hi8jgH-6Mc",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/0Hi8jgH-6Mc.mp4",
+    "youtube_id": "0Hi8jgH-6Mc"
+  },
+  {
+    "answer": "four",
+    "audio_sha256": "fdcc6ff224ba921b4e97a4e39e87bb61b30c3c74eabb8f96e8f49ad65dee9599",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nHow many instruments are sounding in the video?"
+      },
+      {
+        "from": "gpt",
+        "value": "four"
+      }
+    ],
+    "id": "music_0Hi8jgH-6Mc_033982",
+    "media_sha256": "0710b2078743d61c0c8b3260fb9954d66bc3fe8a8d087cc1fa523284fbca46d8",
+    "question": "How many instruments are sounding in the video?",
+    "sample_id": "music_0Hi8jgH-6Mc_033982",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/0Hi8jgH-6Mc.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio_visual:Counting",
+    "video_id": "0Hi8jgH-6Mc",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/0Hi8jgH-6Mc.mp4",
+    "youtube_id": "0Hi8jgH-6Mc"
+  },
+  {
+    "answer": "no",
+    "audio_sha256": "fdcc6ff224ba921b4e97a4e39e87bb61b30c3c74eabb8f96e8f49ad65dee9599",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nAre there drum and xylophone instruments in the video?"
+      },
+      {
+        "from": "gpt",
+        "value": "no"
+      }
+    ],
+    "id": "music_0Hi8jgH-6Mc_034583",
+    "media_sha256": "0710b2078743d61c0c8b3260fb9954d66bc3fe8a8d087cc1fa523284fbca46d8",
+    "question": "Are there drum and xylophone instruments in the video?",
+    "sample_id": "music_0Hi8jgH-6Mc_034583",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/0Hi8jgH-6Mc.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "visual:Counting",
+    "video_id": "0Hi8jgH-6Mc",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/0Hi8jgH-6Mc.mp4",
+    "youtube_id": "0Hi8jgH-6Mc"
+  },
+  {
+    "answer": "four",
+    "audio_sha256": "fdcc6ff224ba921b4e97a4e39e87bb61b30c3c74eabb8f96e8f49ad65dee9599",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nHow many instruments in the video did not sound from beginning to end?"
+      },
+      {
+        "from": "gpt",
+        "value": "four"
+      }
+    ],
+    "id": "music_0Hi8jgH-6Mc_042666",
+    "media_sha256": "0710b2078743d61c0c8b3260fb9954d66bc3fe8a8d087cc1fa523284fbca46d8",
+    "question": "How many instruments in the video did not sound from beginning to end?",
+    "sample_id": "music_0Hi8jgH-6Mc_042666",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/0Hi8jgH-6Mc.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio_visual:Counting",
+    "video_id": "0Hi8jgH-6Mc",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/0Hi8jgH-6Mc.mp4",
+    "youtube_id": "0Hi8jgH-6Mc"
+  },
+  {
+    "answer": "no",
+    "audio_sha256": "3cbe5e78652f20a77e2db5b718515b96f316d6db08af1d644faaa470abd6dad6",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nIs there a xylophone in the entire video?"
+      },
+      {
+        "from": "gpt",
+        "value": "no"
+      }
+    ],
+    "id": "music_V__V_NQo_OI_007734",
+    "media_sha256": "05ea775f7fd4f66d53d0a63e0577a896ab2027984cac3b0199d5a8de0d770f23",
+    "question": "Is there a xylophone in the entire video?",
+    "sample_id": "music_V__V_NQo_OI_007734",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/V__V_NQo_OI.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "visual:Counting",
+    "video_id": "V__V_NQo_OI",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/V__V_NQo_OI.mp4",
+    "youtube_id": "V__V_NQo_OI"
+  },
+  {
+    "answer": "three",
+    "audio_sha256": "3cbe5e78652f20a77e2db5b718515b96f316d6db08af1d644faaa470abd6dad6",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nHow many instruments are sounding in the video?"
+      },
+      {
+        "from": "gpt",
+        "value": "three"
+      }
+    ],
+    "id": "music_V__V_NQo_OI_008005",
+    "media_sha256": "05ea775f7fd4f66d53d0a63e0577a896ab2027984cac3b0199d5a8de0d770f23",
+    "question": "How many instruments are sounding in the video?",
+    "sample_id": "music_V__V_NQo_OI_008005",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/V__V_NQo_OI.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio_visual:Counting",
+    "video_id": "V__V_NQo_OI",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/V__V_NQo_OI.mp4",
+    "youtube_id": "V__V_NQo_OI"
+  },
+  {
+    "answer": "three",
+    "audio_sha256": "3cbe5e78652f20a77e2db5b718515b96f316d6db08af1d644faaa470abd6dad6",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nHow many musical instruments were heard throughout the video?"
+      },
+      {
+        "from": "gpt",
+        "value": "three"
+      }
+    ],
+    "id": "music_V__V_NQo_OI_028685",
+    "media_sha256": "05ea775f7fd4f66d53d0a63e0577a896ab2027984cac3b0199d5a8de0d770f23",
+    "question": "How many musical instruments were heard throughout the video?",
+    "sample_id": "music_V__V_NQo_OI_028685",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/V__V_NQo_OI.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio:Counting",
+    "video_id": "V__V_NQo_OI",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/V__V_NQo_OI.mp4",
+    "youtube_id": "V__V_NQo_OI"
+  },
+  {
+    "answer": "three",
+    "audio_sha256": "3cbe5e78652f20a77e2db5b718515b96f316d6db08af1d644faaa470abd6dad6",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nHow many sounding accordion in the video？"
+      },
+      {
+        "from": "gpt",
+        "value": "three"
+      }
+    ],
+    "id": "music_V__V_NQo_OI_031715",
+    "media_sha256": "05ea775f7fd4f66d53d0a63e0577a896ab2027984cac3b0199d5a8de0d770f23",
+    "question": "How many sounding accordion in the video？",
+    "sample_id": "music_V__V_NQo_OI_031715",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/V__V_NQo_OI.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio_visual:Counting",
+    "video_id": "V__V_NQo_OI",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/V__V_NQo_OI.mp4",
+    "youtube_id": "V__V_NQo_OI"
+  },
+  {
+    "answer": "one",
+    "audio_sha256": "3cbe5e78652f20a77e2db5b718515b96f316d6db08af1d644faaa470abd6dad6",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nHow many types of musical instruments sound in the video?"
+      },
+      {
+        "from": "gpt",
+        "value": "one"
+      }
+    ],
+    "id": "music_V__V_NQo_OI_037788",
+    "media_sha256": "05ea775f7fd4f66d53d0a63e0577a896ab2027984cac3b0199d5a8de0d770f23",
+    "question": "How many types of musical instruments sound in the video?",
+    "sample_id": "music_V__V_NQo_OI_037788",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/V__V_NQo_OI.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio_visual:Counting",
+    "video_id": "V__V_NQo_OI",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/V__V_NQo_OI.mp4",
+    "youtube_id": "V__V_NQo_OI"
+  },
+  {
+    "answer": "no",
+    "audio_sha256": "6b128386490de54ed4924458a14007387196990ccd96a70ba95be0621f216928",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nIs there a suona sound?"
+      },
+      {
+        "from": "gpt",
+        "value": "no"
+      }
+    ],
+    "id": "music_gw7poB4hHG0_004759",
+    "media_sha256": "feb0856d385d3a3e28209a16d51b7094e8ced95c912d17a350615f81c132f2fa",
+    "question": "Is there a suona sound?",
+    "sample_id": "music_gw7poB4hHG0_004759",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/gw7poB4hHG0.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio:Counting",
+    "video_id": "gw7poB4hHG0",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/gw7poB4hHG0.mp4",
+    "youtube_id": "gw7poB4hHG0"
+  },
+  {
+    "answer": "no",
+    "audio_sha256": "6b128386490de54ed4924458a14007387196990ccd96a70ba95be0621f216928",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nIs there a suona sound?"
+      },
+      {
+        "from": "gpt",
+        "value": "no"
+      }
+    ],
+    "id": "music_gw7poB4hHG0_flip_004759",
+    "media_sha256": "a4a56010b56287af85e070826ec80a629e50f21b1245a709576cf433d868fbbd",
+    "question": "Is there a suona sound?",
+    "sample_id": "music_gw7poB4hHG0_flip_004759",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/gw7poB4hHG0_flip.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio:Counting",
+    "video_id": "gw7poB4hHG0_flip",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/gw7poB4hHG0_flip.mp4",
+    "youtube_id": "gw7poB4hHG0"
+  },
+  {
+    "answer": "right",
+    "audio_sha256": "6b128386490de54ed4924458a14007387196990ccd96a70ba95be0621f216928",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nWhich tuba makes the sound last?"
+      },
+      {
+        "from": "gpt",
+        "value": "right"
+      }
+    ],
+    "id": "music_gw7poB4hHG0_018250",
+    "media_sha256": "feb0856d385d3a3e28209a16d51b7094e8ced95c912d17a350615f81c132f2fa",
+    "question": "Which tuba makes the sound last?",
+    "sample_id": "music_gw7poB4hHG0_018250",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/gw7poB4hHG0.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio_visual:Temporal",
+    "video_id": "gw7poB4hHG0",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/gw7poB4hHG0.mp4",
+    "youtube_id": "gw7poB4hHG0"
+  },
+  {
+    "answer": "right",
+    "audio_sha256": "6b128386490de54ed4924458a14007387196990ccd96a70ba95be0621f216928",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nWhich tuba makes the sound last?"
+      },
+      {
+        "from": "gpt",
+        "value": "right"
+      }
+    ],
+    "id": "music_gw7poB4hHG0_flip_018250",
+    "media_sha256": "a4a56010b56287af85e070826ec80a629e50f21b1245a709576cf433d868fbbd",
+    "question": "Which tuba makes the sound last?",
+    "sample_id": "music_gw7poB4hHG0_flip_018250",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/gw7poB4hHG0_flip.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio_visual:Temporal",
+    "video_id": "gw7poB4hHG0_flip",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/gw7poB4hHG0_flip.mp4",
+    "youtube_id": "gw7poB4hHG0"
+  },
+  {
+    "answer": "no",
+    "audio_sha256": "6b128386490de54ed4924458a14007387196990ccd96a70ba95be0621f216928",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nIs there a suona in the entire video?"
+      },
+      {
+        "from": "gpt",
+        "value": "no"
+      }
+    ],
+    "id": "music_gw7poB4hHG0_018352",
+    "media_sha256": "feb0856d385d3a3e28209a16d51b7094e8ced95c912d17a350615f81c132f2fa",
+    "question": "Is there a suona in the entire video?",
+    "sample_id": "music_gw7poB4hHG0_018352",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/gw7poB4hHG0.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "visual:Counting",
+    "video_id": "gw7poB4hHG0",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/gw7poB4hHG0.mp4",
+    "youtube_id": "gw7poB4hHG0"
+  },
+  {
+    "answer": "no",
+    "audio_sha256": "6b128386490de54ed4924458a14007387196990ccd96a70ba95be0621f216928",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nIs there a suona in the entire video?"
+      },
+      {
+        "from": "gpt",
+        "value": "no"
+      }
+    ],
+    "id": "music_gw7poB4hHG0_flip_018352",
+    "media_sha256": "a4a56010b56287af85e070826ec80a629e50f21b1245a709576cf433d868fbbd",
+    "question": "Is there a suona in the entire video?",
+    "sample_id": "music_gw7poB4hHG0_flip_018352",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/gw7poB4hHG0_flip.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "visual:Counting",
+    "video_id": "gw7poB4hHG0_flip",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/gw7poB4hHG0_flip.mp4",
+    "youtube_id": "gw7poB4hHG0"
+  },
+  {
+    "answer": "left",
+    "audio_sha256": "6b128386490de54ed4924458a14007387196990ccd96a70ba95be0621f216928",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nWhich tuba makes the sound first?"
+      },
+      {
+        "from": "gpt",
+        "value": "left"
+      }
+    ],
+    "id": "music_gw7poB4hHG0_031914",
+    "media_sha256": "feb0856d385d3a3e28209a16d51b7094e8ced95c912d17a350615f81c132f2fa",
+    "question": "Which tuba makes the sound first?",
+    "sample_id": "music_gw7poB4hHG0_031914",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/gw7poB4hHG0.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio_visual:Temporal",
+    "video_id": "gw7poB4hHG0",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/gw7poB4hHG0.mp4",
+    "youtube_id": "gw7poB4hHG0"
+  },
+  {
+    "answer": "left",
+    "audio_sha256": "6b128386490de54ed4924458a14007387196990ccd96a70ba95be0621f216928",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nWhich tuba makes the sound first?"
+      },
+      {
+        "from": "gpt",
+        "value": "left"
+      }
+    ],
+    "id": "music_gw7poB4hHG0_flip_031914",
+    "media_sha256": "a4a56010b56287af85e070826ec80a629e50f21b1245a709576cf433d868fbbd",
+    "question": "Which tuba makes the sound first?",
+    "sample_id": "music_gw7poB4hHG0_flip_031914",
+    "scene_audio_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/audio/MUSIC_AVQA_V2/gw7poB4hHG0_flip.wav",
+    "scene_audio_sample_rate": 16000,
+    "source_dataset": "MUSIC-AVQA-v2.0",
+    "source_revision": "76613c9f7f840524c11dd9465018533f9cb1d18d",
+    "task_type": "audio_visual:Temporal",
+    "video_id": "gw7poB4hHG0_flip",
+    "video_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/MUSIC-AVQA-v2.0/gw7poB4hHG0_flip.mp4",
+    "youtube_id": "gw7poB4hHG0"
+  }
+]

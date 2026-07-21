@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -31,6 +32,25 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
 def load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def verify_manifest_lock(exp: dict[str, Any], manifest: Path) -> None:
+    expected = str(exp.get("manifest_sha256") or "").strip().lower()
+    if not expected:
+        return
+    actual = sha256_file(manifest)
+    if actual != expected:
+        raise RuntimeError(
+            f"{exp['id']} manifest SHA256 不匹配：expected={expected}, actual={actual}"
+        )
 
 
 def iter_qa_samples(manifest: Path, limit: int | None = None) -> list[dict[str, Any]]:
@@ -67,6 +87,11 @@ def iter_qa_samples(manifest: Path, limit: int | None = None) -> list[dict[str, 
                     "scene_audio_hop_sec": sample.get("scene_audio_hop_sec", 0.5),
                     "scene_audio_timestamps": sample.get("scene_audio_timestamps"),
                     "frame_timestamps": sample.get("frame_timestamps"),
+                    "physical_media_id": sample.get("physical_media_id"),
+                    "source_dataset": sample.get("source_dataset"),
+                    "task_type": sample.get("task_type"),
+                    "event_label": sample.get("event_label"),
+                    "audio_sha256": sample.get("audio_sha256"),
                     "accept_contains": sample.get("accept_contains"),
                     "accept_regex": sample.get("accept_regex"),
                 }
@@ -135,7 +160,11 @@ def _find_token_subsequence(sequence: torch.Tensor, subsequence: torch.Tensor) -
     return None, None
 
 
-def prediction_correct(prediction: str, qa: dict[str, Any]) -> bool:
+def prediction_correct(
+    prediction: str,
+    qa: dict[str, Any],
+    scorer: str = "exact_match",
+) -> bool:
     normalized_prediction = normalize_text(prediction)
     choices = qa.get("choices")
     if isinstance(choices, dict) and re.fullmatch(r"[a-d]", normalized_prediction):
@@ -156,6 +185,23 @@ def prediction_correct(prediction: str, qa: dict[str, Any]) -> bool:
         regex_match = any(re.search(str(pattern), prediction or "", flags=re.IGNORECASE) for pattern in patterns)
     if contains or patterns:
         return contains_match or regex_match
+    if scorer == "label_terms":
+        answer = str(qa["answer"] or "").strip()
+        if re.fullmatch(r"[A-Da-d]", answer):
+            return normalized_prediction == answer.lower()
+        terms = []
+        for item in answer.split(","):
+            term = re.sub(r"\s*\([^)]*\)\s*", " ", item).strip()
+            if term:
+                terms.append(term)
+        return any(
+            re.search(
+                rf"(?<!\w){re.escape(term)}(?!\w)",
+                prediction or "",
+                flags=re.IGNORECASE,
+            )
+            for term in terms
+        )
     return normalized_prediction == normalize_text(qa["answer"])
 
 
@@ -246,10 +292,57 @@ def apply_audio_condition(
         return result
 
     if condition == "mismatched":
-        if audio_pool:
-            source = audio_pool[(sample_index + 1) % len(audio_pool)]
-            result["scene_audio"] = source.get("scene_audio")
-            result["scene_audio_timestamps"] = source.get("scene_audio_timestamps")
+        candidates: list[tuple[tuple[int, int, int], int, dict[str, Any]]] = []
+        current_id = result.get("sample_id") or result.get("id")
+        current_path = result.get("scene_audio_path")
+        current_media = result.get("physical_media_id")
+        current_label = normalize_text(result.get("event_label"))
+        for offset in range(1, len(audio_pool) + 1):
+            candidate = audio_pool[(sample_index + offset) % len(audio_pool)]
+            candidate_id = candidate.get("sample_id") or candidate.get("id")
+            candidate_path = candidate.get("scene_audio_path")
+            candidate_media = candidate.get("physical_media_id")
+            has_audio = candidate.get("scene_audio") is not None or bool(candidate_path)
+            same_source = (
+                current_id is not None
+                and candidate_id is not None
+                and candidate_id == current_id
+            ) or (
+                current_path is not None and candidate_path == current_path
+            ) or (
+                current_media is not None
+                and candidate_media is not None
+                and candidate_media == current_media
+            )
+            if has_audio and not same_source:
+                candidate_label = normalize_text(candidate.get("event_label"))
+                different_known_label = int(
+                    bool(current_label and candidate_label and current_label != candidate_label)
+                )
+                same_task = int(candidate.get("task_type") == result.get("task_type"))
+                same_dataset = int(candidate.get("source_dataset") == result.get("source_dataset"))
+                candidates.append(((different_known_label, same_task, same_dataset), -offset, candidate))
+        if not candidates:
+            raise ValueError(f"没有可用于 {result.get('id')} 的不同来源错配音频")
+        if current_label and any(score[0] for score, _offset, _candidate in candidates):
+            candidates = [item for item in candidates if item[0][0]]
+        _score, _offset, source = max(candidates, key=lambda item: (item[0], item[1]))
+        result["scene_audio"] = source.get("scene_audio")
+        result["scene_audio_timestamps"] = source.get("scene_audio_timestamps")
+        if source.get("scene_audio_path"):
+            result["scene_audio_path"] = source["scene_audio_path"]
+            for key in (
+                "scene_audio_sample_rate",
+                "scene_audio_window_sec",
+                "scene_audio_hop_sec",
+            ):
+                if source.get(key) is not None:
+                    result[key] = source[key]
+        else:
+            result["scene_audio_path"] = None
+        result["mismatch_source_id"] = source.get("sample_id") or source.get("id")
+        result["mismatch_source_physical_media_id"] = source.get("physical_media_id")
+        result["mismatch_source_event_label"] = source.get("event_label")
         return result
 
     if audio is None:
@@ -300,6 +393,60 @@ def load_model_once(model_path: str, device: str, model_name_override: str | Non
         os.chdir(cwd)
     model.eval()
     return tokenizer, model, image_processor, context_len
+
+
+def maybe_replace_scene_audio_encoder(model: Any, env: dict[str, str]) -> bool:
+    encoder_type = env.get("AS_M4_SCENE_AUDIO_ENCODER_TYPE")
+    if not encoder_type:
+        return False
+    signature = (
+        encoder_type,
+        env.get("AS_M4_SCENE_AUDIO_BEATS_CHECKPOINT"),
+        env.get("AS_M4_SCENE_AUDIO_BEATS_CODE_ROOT"),
+        env.get("AS_M4_SCENE_AUDIO_BEATS_CHECKPOINT_SHA256"),
+        env.get("AS_M4_SCENE_AUDIO_TORCHAUDIO_BUNDLE"),
+        env.get("AS_M4_SCENE_AUDIO_TORCHAUDIO_WEIGHT_PATH"),
+    )
+    if getattr(model, "_as_m4_scene_audio_encoder_signature", None) == signature:
+        return False
+
+    model_body = model.get_model() if hasattr(model, "get_model") else model
+    model.config.scene_audio_encoder_type = encoder_type
+    model.config.scene_audio_hidden_size = int(model.config.hidden_size)
+    model.config.scene_audio_torchaudio_bundle = env.get("AS_M4_SCENE_AUDIO_TORCHAUDIO_BUNDLE", "WAV2VEC2_BASE")
+    model.config.scene_audio_torchaudio_weight_path = env.get("AS_M4_SCENE_AUDIO_TORCHAUDIO_WEIGHT_PATH")
+    model.config.scene_audio_sample_rate = int(env.get("AS_M4_SCENE_AUDIO_SAMPLE_RATE", "16000"))
+    model.config.scene_audio_beats_checkpoint = env.get(
+        "AS_M4_SCENE_AUDIO_BEATS_CHECKPOINT",
+        "intersuit/checkpoints/BEATs_iter3_plus_AS2M.pt",
+    )
+    model.config.scene_audio_beats_code_root = env.get(
+        "AS_M4_SCENE_AUDIO_BEATS_CODE_ROOT",
+        "third_party/OmniMMI/baselines/videollama2/model",
+    )
+    model.config.scene_audio_beats_checkpoint_sha256 = env.get(
+        "AS_M4_SCENE_AUDIO_BEATS_CHECKPOINT_SHA256"
+    )
+    model.config.scene_audio_precomputed_shared_space = env.get(
+        "AS_M4_SCENE_AUDIO_PRECOMPUTED_SHARED_SPACE", "0"
+    ) in {"1", "true", "True", "yes"}
+
+    from intersuit.model.scene_audio_encoder.builder import build_scene_audio_encoder
+    from intersuit.model.streaming_av.builder import build_streaming_av_module
+
+    device = next(model.parameters()).device
+    replacement = build_scene_audio_encoder(model.config).to(device=device)
+    replacement.eval()
+    setattr(model_body, "scene_audio_encoder", replacement)
+    if getattr(model_body, "streaming_av_module", None) is None:
+        streaming_av_module = build_streaming_av_module(model.config).to(
+            device=device,
+            dtype=next(model.parameters()).dtype,
+        )
+        streaming_av_module.eval()
+        setattr(model_body, "streaming_av_module", streaming_av_module)
+    model._as_m4_scene_audio_encoder_signature = signature
+    return True
 
 
 def _resolve_repo_path(path_value: str) -> Path:
@@ -542,6 +689,15 @@ def model_prediction(
     previous_enable_scene_audio = getattr(model.config, "enable_scene_audio", None)
     previous_residual_scale = getattr(model.config, "debug_audio_residual_scale", 1.0)
     previous_delta_ratio_cap = getattr(model.config, "audio_delta_ratio_cap", 0.0)
+    previous_gate_v1 = getattr(model.config, "enable_audio_confidence_gate_v1", False)
+    previous_event_aligner_v1 = getattr(model.config, "enable_audio_event_aligner_v1", False)
+    previous_fusion_mode = getattr(model.config, "as_m4_fusion_mode", "aligned_gated")
+    previous_simple_audio_gate = getattr(model.config, "as_m4_simple_audio_gate", 1.0)
+    previous_inference_simple_audio_gate = getattr(
+        model.config,
+        "as_m4_inference_simple_audio_gate",
+        None,
+    )
     if force_audio_gate is not None:
         model.config.force_audio_gate = float(force_audio_gate)
     if enable_scene_audio is not None:
@@ -552,6 +708,42 @@ def model_prediction(
     delta_ratio_cap = exp.get("env", {}).get("AS_M4_AUDIO_DELTA_RATIO_CAP")
     active_delta_ratio_cap = float(delta_ratio_cap) if delta_ratio_cap is not None else 0.0
     model.config.audio_delta_ratio_cap = active_delta_ratio_cap
+    gate_v1 = exp.get("env", {}).get("AS_M4_ENABLE_AUDIO_CONFIDENCE_GATE_V1")
+    active_gate_v1 = str(gate_v1 or "0") in {"1", "true", "True"}
+    model.config.enable_audio_confidence_gate_v1 = active_gate_v1
+    event_aligner_v1 = exp.get("env", {}).get("AS_M4_ENABLE_AUDIO_EVENT_ALIGNER_V1")
+    active_event_aligner_v1 = str(event_aligner_v1 or "0") in {"1", "true", "True"}
+    model.config.enable_audio_event_aligner_v1 = active_event_aligner_v1
+    active_fusion_mode = str(
+        exp.get("env", {}).get("AS_M4_FUSION_MODE") or previous_fusion_mode
+    )
+    active_simple_audio_gate = float(
+        exp.get("env", {}).get("AS_M4_SIMPLE_AUDIO_GATE")
+        or previous_simple_audio_gate
+    )
+    inference_simple_audio_gate = exp.get("env", {}).get(
+        "AS_M4_INFERENCE_SIMPLE_AUDIO_GATE"
+    )
+    active_inference_simple_audio_gate = (
+        float(inference_simple_audio_gate)
+        if inference_simple_audio_gate is not None
+        else previous_inference_simple_audio_gate
+    )
+    model.config.as_m4_fusion_mode = active_fusion_mode
+    model.config.as_m4_simple_audio_gate = active_simple_audio_gate
+    model.config.as_m4_inference_simple_audio_gate = active_inference_simple_audio_gate
+    streaming_av_module = getattr(model.get_model(), "streaming_av_module", None)
+    if isinstance(streaming_av_module, list):
+        streaming_av_module = streaming_av_module[0]
+    previous_module_gate_v1 = None
+    if streaming_av_module is not None and hasattr(streaming_av_module, "confidence_gate"):
+        previous_module_gate_v1 = streaming_av_module.confidence_gate.enable_v1
+        streaming_av_module.confidence_gate.enable_v1 = active_gate_v1
+    if exp.get("env", {}).get("AS_M4_SCENE_AUDIO_ENCODER_TYPE"):
+        maybe_replace_scene_audio_encoder(
+            model,
+            exp.get("env", {}),
+        )
     frame_timestamps_arg = None
     if using_video_feature and qa.get("frame_timestamps") is not None:
         frame_timestamps_arg = torch.as_tensor(qa.get("frame_timestamps") or [], dtype=torch.float32, device=device).unsqueeze(0)
@@ -643,6 +835,13 @@ def model_prediction(
                 model.config.enable_scene_audio = previous_enable_scene_audio
             model.config.debug_audio_residual_scale = previous_residual_scale
             model.config.audio_delta_ratio_cap = previous_delta_ratio_cap
+            model.config.enable_audio_confidence_gate_v1 = previous_gate_v1
+            model.config.enable_audio_event_aligner_v1 = previous_event_aligner_v1
+            model.config.as_m4_fusion_mode = previous_fusion_mode
+            model.config.as_m4_simple_audio_gate = previous_simple_audio_gate
+            model.config.as_m4_inference_simple_audio_gate = previous_inference_simple_audio_gate
+            if previous_module_gate_v1 is not None:
+                streaming_av_module.confidence_gate.enable_v1 = previous_module_gate_v1
     diagnostics = None
     if dump_diagnostics:
         diagnostics = jsonable_diagnostics(getattr(model, "_last_streaming_av_diagnostics", None))
@@ -660,6 +859,11 @@ def model_prediction(
     token_debug["audio_input"] = audio_input_debug
     token_debug["audio_residual_scale"] = active_residual_scale
     token_debug["audio_delta_ratio_cap"] = active_delta_ratio_cap
+    token_debug["audio_confidence_gate_v1"] = active_gate_v1
+    token_debug["audio_event_aligner_v1"] = active_event_aligner_v1
+    token_debug["as_m4_fusion_mode"] = active_fusion_mode
+    token_debug["as_m4_simple_audio_gate"] = active_simple_audio_gate
+    token_debug["as_m4_inference_simple_audio_gate"] = active_inference_simple_audio_gate
     token_debug["first_token_logits"] = first_token_logits
     return prediction, diagnostics, {"prompt": prompt_debug, "tokens": token_debug}
 
@@ -671,6 +875,7 @@ def run_predictions(
     feature_root: Path,
     device: str,
     max_new_tokens: int,
+    skip: int = 0,
     experiments: set[str] | None = None,
     model_name_override: str | None = None,
     dry_run: bool = False,
@@ -691,16 +896,21 @@ def run_predictions(
         num_selected += 1
         output_jsonl = Path(str(exp["output_jsonl"]))
         outputs.append(str(output_jsonl))
+        manifest = Path(str(exp["manifest"]))
+        verify_manifest_lock(exp, manifest)
         if dry_run:
             continue
-        manifest = Path(str(exp["manifest"]))
         all_samples = iter_qa_samples(manifest, limit=None)
-        samples = all_samples[:limit] if limit is not None else all_samples
+        if skip < 0:
+            raise ValueError("skip must be non-negative")
+        samples = all_samples[skip:]
+        if limit is not None:
+            samples = samples[:limit]
         output_jsonl.parent.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
         env.update({str(k): str(v) for k, v in (exp.get("env") or {}).items()})
         rows = []
-        for sample_index, qa in enumerate(samples):
+        for sample_index, qa in enumerate(samples, start=skip):
             qa = apply_audio_condition(qa, exp, all_samples, sample_index)
             if backend == "oracle":
                 prediction = oracle_prediction(str(qa["answer"]), str(exp["id"]), qa.get("id"))
@@ -720,7 +930,11 @@ def run_predictions(
                 )
             else:
                 raise ValueError(f"Unknown backend: {backend}")
-            correct = prediction_correct(prediction, qa)
+            correct = prediction_correct(
+                prediction,
+                qa,
+                scorer=str(exp.get("scorer") or "exact_match"),
+            )
             row = {
                 "id": qa["id"],
                 "sample_id": qa["sample_id"],
@@ -732,6 +946,12 @@ def run_predictions(
                 "audio_condition": exp.get("audio_condition"),
                 "alignment": exp.get("alignment"),
                 "gate_ablation": exp.get("gate_ablation"),
+                "task_type": qa.get("task_type"),
+                "event_label": qa.get("event_label"),
+                "physical_media_id": qa.get("physical_media_id"),
+                "mismatch_source_id": qa.get("mismatch_source_id"),
+                "mismatch_source_physical_media_id": qa.get("mismatch_source_physical_media_id"),
+                "mismatch_source_event_label": qa.get("mismatch_source_event_label"),
             }
             if dump_diagnostics:
                 row["as_m4_diagnostics"] = diagnostics
@@ -770,6 +990,7 @@ def main() -> None:
     parser.add_argument("--plan", required=True)
     parser.add_argument("--backend", choices=["oracle", "model"], default="oracle")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--skip", type=int, default=0, help="Skip this many QA records at the start of the locked manifest.")
     parser.add_argument("--feature_root", default="intersuit/inputs/features/as_m4_smoke")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--max_new_tokens", type=int, default=64)
@@ -786,6 +1007,7 @@ def main() -> None:
         Path(args.plan),
         backend=args.backend,
         limit=args.limit,
+        skip=args.skip,
         feature_root=Path(args.feature_root),
         device=args.device,
         max_new_tokens=args.max_new_tokens,

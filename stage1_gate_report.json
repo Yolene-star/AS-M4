@@ -1,0 +1,74 @@
+{
+  "candidate_fields": {
+    "path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/candidate_fields.json",
+    "sha256": "8c4c4a18388dfc0d1c781bbc2cad77ead85c242aed743fd7d6b7b524d36fe8ff"
+  },
+  "conditions": {
+    "audio_track_decode_rate_100_percent": true,
+    "frozen_historical_dev_test_overlap_zero": true,
+    "internal_duplicate_zero": true,
+    "replacement_and_final_list_reproducible": true,
+    "scene_audio_path_valid_rate_100_percent": true,
+    "valid_physical_media_at_least_500": true,
+    "video_decode_rate_100_percent": true
+  },
+  "formal_train_dev_manifest_generated": false,
+  "media_moved_to_training_directory": false,
+  "metrics": {
+    "audio_track_decode_rate": 1.0,
+    "candidate_qa_count": 1832,
+    "download_entry_count": 550,
+    "download_unresolved_count": 0,
+    "internal_derived_id_duplicate_count": 0,
+    "internal_media_sha256_duplicate_count": 0,
+    "invalid_media_count": 6,
+    "media_sha256_overlap_count": 0,
+    "raw_validation_accepted_count": 544,
+    "raw_validation_candidate_count": 550,
+    "raw_validation_rejected_count": 6,
+    "replacement_count": 6,
+    "scene_audio_path_valid_rate": 1.0,
+    "unique_scene_audio_path_count": 568,
+    "unique_video_path_count": 568,
+    "valid_base_media_count": 544,
+    "valid_physical_media_count": 568,
+    "video_decode_rate": 1.0,
+    "video_id_overlap_count": 0,
+    "youtube_id_overlap_count": 0
+  },
+  "physical_media_audit": {
+    "path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/physical_media_audit_report.json",
+    "sha256": "10e67b2df9be045bd188b5cbe8299c08bd27286869cfa3bfeeca0c99dac1ec85",
+    "status": "PASS"
+  },
+  "raw_quarantine_note": "6 个与排除集碰撞的 AVUT 条目已记录到 invalid_new_media.json，未进入有效集、WAV 候选或泄漏门禁。",
+  "raw_quarantine_status": "FAIL",
+  "reports": {
+    "download_failures.json": {
+      "path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/download_failures.json",
+      "sha256": "7708b9054aa56b664ba379306c9234a8f4d0726dd24794b534a10093f1656788"
+    },
+    "download_status.json": {
+      "path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/download_status.json",
+      "sha256": "f94b47388d22a4a376105c6ff355c803ade4a17bf0e9cf0b1c5fa956d862e6eb"
+    },
+    "invalid_new_media.json": {
+      "path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/invalid_new_media.json",
+      "sha256": "875fdbc0f2528d65033afdd190bc4459e1fec3484adfd13db8e3c661d1ac0102"
+    },
+    "leakage_gate_report.json": {
+      "path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/leakage_gate_report.json",
+      "sha256": "379b793fee75d2d9514b67b4c319b47a9886a8b8a4a2fe072a84673a19e3844b"
+    },
+    "quarantine_validation_report.json": {
+      "path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/quarantine_validation_report.json",
+      "sha256": "61c499319322df0eecc398a97ea380748c921e71237e6d9f7f6ae138637086fa"
+    },
+    "valid_new_media.json": {
+      "path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/valid_new_media.json",
+      "sha256": "f95d981bef0947beea67f1276bfe333eeab2001fe168ab844e93823839a30d8a"
+    }
+  },
+  "status": "PASS",
+  "training_started": false
+}

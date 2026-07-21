@@ -1,0 +1,14 @@
+{
+  "candidate_count": 1832,
+  "candidate_set_sha256": "f31f69b8d75e457f9328df7324123bf48e3bd89b28e5d86b162f02bf83804b34",
+  "error_count": 0,
+  "error_counts": {},
+  "errors": [],
+  "exclusion_set_sha256": "1c20401a2ac285ebb01b01874790ed2ff6f8fcec9c2ec2b82ff3d72a11050988",
+  "manifest_path": "/home/yjm/M4-main/intersuit/datasets/NEW_AV_TRAIN/quarantine/candidate_fields.json",
+  "manifest_sha256": "8c4c4a18388dfc0d1c781bbc2cad77ead85c242aed743fd7d6b7b524d36fe8ff",
+  "media_sha256_overlap_count": 0,
+  "status": "PASS",
+  "video_id_overlap_count": 0,
+  "youtube_id_overlap_count": 0
+}

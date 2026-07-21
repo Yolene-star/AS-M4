@@ -1,0 +1,13 @@
+{
+  "dataset": {
+    "name": "as_m4_smoke_video_features",
+    "split": "smoke",
+    "manifest": "intersuit/inputs/texts/as_m4_smoke_video_features.json",
+    "scorer": "exact_match_smoke"
+  },
+  "models": {
+    "baseline_m4": "intersuit/checkpoints/M4-LongVA-7B-Qwen2-train-12k-lowmem-nofreeze",
+    "as_m4": "intersuit/checkpoints/AS-M4-32k-canary150-vfeat-asmodules-ddp-notdynamo-unused"
+  },
+  "output_root": "intersuit/harness/artifacts/as_m4_e0_e7_smoke/predictions"
+}

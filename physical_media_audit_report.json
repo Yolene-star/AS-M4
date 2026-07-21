@@ -1,0 +1,19 @@
+{
+  "audio_track_decode_rate": 1.0,
+  "base_video_audio_decode_pass_count": 544,
+  "candidate_fields_sha256": "8c4c4a18388dfc0d1c781bbc2cad77ead85c242aed743fd7d6b7b524d36fe8ff",
+  "flip_decode_failures": [],
+  "flip_media_count": 24,
+  "flip_video_audio_decode_pass_count": 24,
+  "internal_derived_id_duplicate_count": 0,
+  "internal_media_sha256_duplicate_count": 0,
+  "physical_media_count": 568,
+  "scene_audio_16k_mono_pass_count": 568,
+  "scene_audio_count": 568,
+  "scene_audio_failures": [],
+  "scene_audio_path_valid_rate": 1.0,
+  "status": "PASS",
+  "valid_base_media_count": 544,
+  "valid_new_media_sha256": "f95d981bef0947beea67f1276bfe333eeab2001fe168ab844e93823839a30d8a",
+  "video_decode_rate": 1.0
+}

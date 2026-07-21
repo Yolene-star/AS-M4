@@ -1,0 +1,13 @@
+{
+  "dataset": {
+    "name": "as_m4_real_smoke_water",
+    "split": "smoke",
+    "manifest": "intersuit/inputs/texts/as_m4_real_smoke_water.json",
+    "scorer": "contains_regex_smoke"
+  },
+  "models": {
+    "baseline_m4": "intersuit/checkpoints/M4-LongVA-7B-Qwen2-train-12k-lowmem-nofreeze",
+    "as_m4": "intersuit/checkpoints/AS-M4-12kbase-retrain-2step-e0e1e7-20260716"
+  },
+  "output_root": "intersuit/harness/artifacts/as_m4_e0e1e7_20260716/predictions"
+}

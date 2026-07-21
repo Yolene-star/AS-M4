@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from torch import nn
 
+from .audio_event_aligner import LocalAudioEventAligner
 from .confidence_gate import AudioConfidenceGate
+from .dynamic_window_selector import DynamicWindowSelector
 from .event_detector import AudioEventDetector
 from .fusion import GatedAVFusion
 from .temporal_aligner import CausalTemporalAligner
@@ -21,7 +23,26 @@ class StreamingAVModule(nn.Module):
         align_dim = int(getattr(config, "streaming_av_align_dim", hidden_size))
         max_offset_sec = float(getattr(config, "max_av_offset_sec", 1.5))
         gate_logit_bias = float(getattr(config, "as_m4_gate_logit_bias", -5.0))
+        enable_gate_v1 = bool(getattr(config, "enable_audio_confidence_gate_v1", False))
+        silence_threshold = float(getattr(config, "audio_gate_silence_threshold", 1e-4))
+        rms_reference = float(getattr(config, "audio_gate_rms_reference", 0.05))
         fusion_init = str(getattr(config, "as_m4_fusion_init", "zero"))
+        selector_dim = int(getattr(config, "scene_audio_selector_dim", hidden_size))
+        selector_scales = _parse_scales(getattr(config, "dynamic_window_scales_sec", "1.0,2.0,4.0"))
+
+        self.dynamic_window_selector = DynamicWindowSelector(
+            input_dim=selector_dim,
+            scales_sec=selector_scales,
+            top_k=int(getattr(config, "dynamic_window_top_k", 16)),
+            nms_iou=float(getattr(config, "dynamic_window_nms_iou", 0.6)),
+            ema_beta=float(getattr(config, "dynamic_window_ema_beta", 0.9)),
+            start_scale=float(getattr(config, "dynamic_window_start_scale", 1.0)),
+            hold_scale=float(getattr(config, "dynamic_window_hold_scale", 0.25)),
+            min_score=float(getattr(config, "dynamic_window_min_score", 0.05)),
+            rms_reference=float(getattr(config, "audio_gate_rms_reference", 0.05)),
+            silence_threshold=float(getattr(config, "audio_gate_silence_threshold", 1e-4)),
+            causal=bool(getattr(config, "dynamic_window_causal", True)),
+        )
 
         self.event_detector = AudioEventDetector(hidden_size, num_events)
         self.temporal_aligner = CausalTemporalAligner(
@@ -30,9 +51,67 @@ class StreamingAVModule(nn.Module):
             max_offset_sec=max_offset_sec,
             similarity_chunk_size=getattr(config, "av_similarity_chunk_size", None),
         )
-        self.confidence_gate = AudioConfidenceGate(hidden_size, quality_dim=quality_dim, gate_logit_bias=gate_logit_bias)
+        local_offset_sec = float(getattr(config, "audio_event_local_offset_sec", 0.5))
+        enable_offset_scorer = bool(getattr(config, "enable_audio_event_offset_scorer", False))
+        offset_scorer_bundle_path = getattr(config, "audio_event_offset_scorer_bundle_path", None) or None
+        if enable_offset_scorer and offset_scorer_bundle_path is None:
+            raise ValueError(
+                "audio_event_offset_scorer_bundle_path is required when the frozen offset scorer is enabled"
+            )
+        self.audio_event_aligner = LocalAudioEventAligner(
+            hidden_size=hidden_size,
+            align_dim=int(getattr(config, "audio_event_align_dim", None) or align_dim),
+            candidate_offsets=(-local_offset_sec, 0.0, local_offset_sec),
+            event_strength_weight=float(getattr(config, "audio_event_strength_weight", 0.05)),
+            semantic_feature_mode=str(getattr(config, "audio_event_semantic_feature_mode", "disabled")),
+            projector_checkpoint_path=getattr(config, "audio_event_projector_checkpoint_path", None) or None,
+            offset_scorer_bundle_path=offset_scorer_bundle_path if enable_offset_scorer else None,
+            offset_scorer_margin_threshold=float(
+                getattr(config, "audio_event_offset_scorer_margin_threshold", 0.15)
+            ),
+            offset_scorer_stabilization_strategy=str(
+                getattr(config, "audio_event_offset_scorer_stabilization_strategy", "none")
+            ),
+            offset_scorer_consecutive_windows=int(
+                getattr(config, "audio_event_offset_scorer_consecutive_windows", 2)
+            ),
+            offset_scorer_hold_margin=float(
+                getattr(config, "audio_event_offset_scorer_hold_margin", 0.10)
+            ),
+            offset_scorer_switch_margin=float(
+                getattr(config, "audio_event_offset_scorer_switch_margin", 0.30)
+            ),
+            offset_scorer_moving_average_windows=int(
+                getattr(config, "audio_event_offset_scorer_moving_average_windows", 3)
+            ),
+            enable_temporal_offset_gru_diagnostic=bool(
+                getattr(config, "enable_temporal_offset_gru_diagnostic", False)
+            ),
+            temporal_offset_gru_checkpoint_path=(
+                getattr(config, "temporal_offset_gru_checkpoint_path", None) or None
+            ),
+        )
+        self.confidence_gate = AudioConfidenceGate(
+            hidden_size,
+            quality_dim=quality_dim,
+            gate_logit_bias=gate_logit_bias,
+            enable_v1=enable_gate_v1,
+            silence_threshold=silence_threshold,
+            rms_reference=rms_reference,
+            max_offset_sec=max_offset_sec,
+        )
         self.fusion = GatedAVFusion(hidden_size, fusion_init=fusion_init)
 
 
 def build_streaming_av_module(config) -> StreamingAVModule:
     return StreamingAVModule(config)
+
+
+def _parse_scales(value) -> tuple[float, ...]:
+    if isinstance(value, str):
+        values = tuple(float(item.strip()) for item in value.split(",") if item.strip())
+    else:
+        values = tuple(float(item) for item in value)
+    if not values:
+        raise ValueError("dynamic_window_scales_sec must not be empty")
+    return values

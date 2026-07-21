@@ -6,7 +6,9 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 import torch
 
 
@@ -101,6 +103,34 @@ def test_prediction_correct_supports_contains_and_regex():
     assert not runner.prediction_correct("three people", contains_qa)
 
 
+def test_prediction_correct_label_terms_uses_phrase_boundaries():
+    assert runner.prediction_correct(
+        "The video shows a bus on the road.",
+        {"answer": "Bus"},
+        scorer="label_terms",
+    )
+    assert runner.prediction_correct(
+        "Frying",
+        {"answer": "Frying (food)"},
+        scorer="label_terms",
+    )
+    assert runner.prediction_correct(
+        "A man speaking can be heard.",
+        {"answer": "Male speech, man speaking"},
+        scorer="label_terms",
+    )
+    assert not runner.prediction_correct(
+        "Business district",
+        {"answer": "Bus"},
+        scorer="label_terms",
+    )
+    assert not runner.prediction_correct(
+        "A detailed answer",
+        {"answer": "A"},
+        scorer="label_terms",
+    )
+
+
 def test_jsonable_diagnostics_converts_tensors():
     value = [{"gate_mean": runner.torch.tensor(0.5), "gate": runner.torch.tensor([[0.25, 0.75]])}, None]
 
@@ -157,6 +187,42 @@ def test_oracle_backend_writes_prediction_files(tmp_path):
     assert json.loads(e3_rows[0])["correct"] is False
 
 
+def test_oracle_backend_can_skip_locked_manifest_prefix(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    _write_json(
+        manifest,
+        [
+            {
+                "id": sample_id,
+                "conversations": [
+                    {"from": "human", "value": "Q"},
+                    {"from": "gpt", "value": "A"},
+                ],
+            }
+            for sample_id in ("s0", "s1", "s2")
+        ],
+    )
+    output = tmp_path / "pred.jsonl"
+    plan = tmp_path / "plan.jsonl"
+    plan.write_text(
+        json.dumps({"id": "E2", "manifest": str(manifest), "output_jsonl": str(output)}) + "\n",
+        encoding="utf-8",
+    )
+
+    runner.run_predictions(
+        plan,
+        backend="oracle",
+        limit=None,
+        skip=1,
+        feature_root=tmp_path,
+        device="cpu",
+        max_new_tokens=4,
+    )
+
+    rows = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert [row["sample_id"] for row in rows] == ["s1", "s2"]
+
+
 def test_dry_run_does_not_create_prediction_files(tmp_path):
     plan = tmp_path / "plan.jsonl"
     pred = tmp_path / "pred.jsonl"
@@ -166,6 +232,45 @@ def test_dry_run_does_not_create_prediction_files(tmp_path):
 
     assert result["dry_run"] is True
     assert not pred.exists()
+
+
+def test_manifest_sha256_lock_rejects_changed_manifest(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    _write_json(
+        manifest,
+        [
+            {
+                "id": "s0",
+                "conversations": [
+                    {"from": "human", "value": "Q"},
+                    {"from": "gpt", "value": "A"},
+                ],
+            }
+        ],
+    )
+    plan = tmp_path / "plan.jsonl"
+    plan.write_text(
+        json.dumps(
+            {
+                "id": "LOCKED",
+                "manifest": str(manifest),
+                "manifest_sha256": "0" * 64,
+                "output_jsonl": str(tmp_path / "predictions.jsonl"),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="manifest SHA256 不匹配"):
+        runner.run_predictions(
+            plan,
+            backend="oracle",
+            limit=1,
+            feature_root=tmp_path,
+            device="cpu",
+            max_new_tokens=4,
+        )
 
 
 def test_experiment_filter_runs_only_requested_ids(tmp_path):
@@ -237,6 +342,140 @@ def test_apply_audio_condition_builds_counterfactual_audio():
     assert shifted["scene_audio"] == [[2.0, 2.0], [1.0, 1.0]]
     assert shifted["scene_audio_timestamps"] == [[1.0, 2.0], [0.0, 1.0]]
     assert muted["scene_audio"] is None
+
+
+def test_mismatched_condition_replaces_path_backed_audio():
+    qa0 = {
+        "scene_audio_path": "first.mp4",
+        "scene_audio_sample_rate": 16000,
+        "scene_audio_window_sec": 1.0,
+        "scene_audio_hop_sec": 0.5,
+    }
+    qa1 = {
+        "scene_audio_path": "second.mp4",
+        "scene_audio_sample_rate": 8000,
+        "scene_audio_window_sec": 2.0,
+        "scene_audio_hop_sec": 1.0,
+    }
+
+    mismatched = runner.apply_audio_condition(
+        qa0,
+        {"audio_condition": "mismatched"},
+        [qa0, qa1],
+        0,
+    )
+
+    assert mismatched["scene_audio_path"] == "second.mp4"
+    assert mismatched["scene_audio_sample_rate"] == 8000
+    assert mismatched["scene_audio_window_sec"] == 2.0
+    assert mismatched["scene_audio_hop_sec"] == 1.0
+
+
+def test_mismatched_condition_skips_rows_without_audio():
+    qa0 = {
+        "id": "first_turn0",
+        "sample_id": "first",
+        "scene_audio_path": "first.mp4",
+    }
+    no_audio = {
+        "id": "silent_turn0",
+        "sample_id": "silent",
+        "scene_audio_path": None,
+    }
+    qa2 = {
+        "id": "third_turn0",
+        "sample_id": "third",
+        "scene_audio_path": "third.mp4",
+    }
+
+    mismatched = runner.apply_audio_condition(
+        qa0,
+        {"audio_condition": "mismatched"},
+        [qa0, no_audio, qa2],
+        0,
+    )
+
+    assert mismatched["scene_audio_path"] == "third.mp4"
+
+
+def test_mismatched_condition_prefers_same_task_with_different_event():
+    qa0 = {
+        "id": "first_turn0",
+        "sample_id": "first",
+        "physical_media_id": "media-1",
+        "scene_audio_path": "first.mp4",
+        "task_type": "audio",
+        "event_label": "dog",
+    }
+    same_event = {
+        "id": "second_turn0",
+        "sample_id": "second",
+        "physical_media_id": "media-2",
+        "scene_audio_path": "second.mp4",
+        "task_type": "audio",
+        "event_label": "dog",
+    }
+    different_event = {
+        "id": "third_turn0",
+        "sample_id": "third",
+        "physical_media_id": "media-3",
+        "scene_audio_path": "third.mp4",
+        "task_type": "audio",
+        "event_label": "piano",
+    }
+
+    mismatched = runner.apply_audio_condition(
+        qa0,
+        {"audio_condition": "mismatched"},
+        [qa0, same_event, different_event],
+        0,
+    )
+
+    assert mismatched["scene_audio_path"] == "third.mp4"
+    assert mismatched["mismatch_source_physical_media_id"] == "media-3"
+    assert mismatched["mismatch_source_event_label"] == "piano"
+
+
+def test_scene_audio_backend_is_installed_once_per_signature(monkeypatch):
+    import intersuit.model.scene_audio_encoder.builder as encoder_builder
+    import intersuit.model.streaming_av.builder as streaming_builder
+
+    calls = {"encoder": 0, "streaming": 0}
+
+    def build_encoder(config):
+        calls["encoder"] += 1
+        return torch.nn.Linear(2, 2)
+
+    def build_streaming(config):
+        calls["streaming"] += 1
+        return torch.nn.Linear(2, 2)
+
+    monkeypatch.setattr(encoder_builder, "build_scene_audio_encoder", build_encoder)
+    monkeypatch.setattr(streaming_builder, "build_streaming_av_module", build_streaming)
+
+    class FakeModel:
+        def __init__(self):
+            self.config = SimpleNamespace(hidden_size=4)
+            self.body = SimpleNamespace(streaming_av_module=None)
+            self.weight = torch.nn.Parameter(torch.ones(1))
+
+        def get_model(self):
+            return self.body
+
+        def parameters(self):
+            return iter([self.weight])
+
+    model = FakeModel()
+    env = {
+        "AS_M4_SCENE_AUDIO_ENCODER_TYPE": "beats",
+        "AS_M4_SCENE_AUDIO_BEATS_CHECKPOINT": "beats.pt",
+        "AS_M4_SCENE_AUDIO_BEATS_CODE_ROOT": "beats_source",
+    }
+
+    assert runner.maybe_replace_scene_audio_encoder(model, env) is True
+    assert runner.maybe_replace_scene_audio_encoder(model, env) is False
+    assert calls == {"encoder": 1, "streaming": 1}
+    assert model.config.scene_audio_hidden_size == 4
 
 
 def test_generated_token_slice_not_empty_when_tokens_exist():

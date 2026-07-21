@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -38,6 +39,47 @@ def resolve_path(path_text: str) -> Path:
     return path
 
 
+def validate_data_audit(audit: dict) -> tuple[bool, dict]:
+    """Validate either the legacy M4 audit or the Stage 2 manifest gate."""
+
+    if "missing_image_count" in audit or "missing_audio_count" in audit:
+        details = {
+            "audit_format": "legacy_m4",
+            "audit_status": audit.get("status"),
+            "missing_image_count": audit.get("missing_image_count"),
+            "missing_audio_count": audit.get("missing_audio_count"),
+        }
+        passed = (
+            audit.get("missing_image_count") == 0
+            and audit.get("missing_audio_count") == 0
+        )
+        return passed, details
+
+    if "scene_audio_path_valid_rate" in audit or "video_audio_decode_rate" in audit:
+        details = {
+            "audit_format": "stage2_gate",
+            "audit_status": audit.get("status"),
+            "error_count": audit.get("error_count"),
+            "full_decode": audit.get("full_decode"),
+            "scene_audio_path_valid_rate": audit.get("scene_audio_path_valid_rate"),
+            "video_audio_decode_rate": audit.get("video_audio_decode_rate"),
+        }
+        passed = (
+            audit.get("status") == "PASS"
+            and audit.get("error_count") == 0
+            and audit.get("full_decode") is True
+            and audit.get("scene_audio_path_valid_rate") == 1.0
+            and audit.get("video_audio_decode_rate") == 1.0
+        )
+        return passed, details
+
+    return False, {
+        "audit_format": "unknown",
+        "audit_status": audit.get("status"),
+        "reason_zh": "数据审计格式无法识别",
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="检查 M4 复现训练前置条件。")
     parser.add_argument("--stable_gpus", default="0,2,3,4")
@@ -48,6 +90,21 @@ def main() -> None:
     )
     parser.add_argument("--max_idle_memory_mib", type=int, default=500)
     parser.add_argument("--audit_json", default="train_logs/m4_data_audit_generated_audio.json")
+    parser.add_argument(
+        "--expected_nccl_socket_ifname",
+        default="",
+        help="如提供，则要求当前 NCCL_SOCKET_IFNAME 与该值一致；AS-M4 单机四卡默认建议 lo。",
+    )
+    parser.add_argument(
+        "--allow_existing_train_processes",
+        action="store_true",
+        help="允许已有 train_mem.py 训练进程存在。默认不允许，用于避免 timeout 残留 rank 污染后续 NCCL。",
+    )
+    parser.add_argument(
+        "--train_process_pattern",
+        default="intersuit/train/train_mem.py",
+        help="用于检测残留训练进程的命令行子串。",
+    )
     args = parser.parse_args()
 
     stable = {gpu.strip() for gpu in args.stable_gpus.split(",") if gpu.strip()}
@@ -62,6 +119,72 @@ def main() -> None:
         "allowed_power_limits": sorted(allowed_power_limits),
         "checks": [],
     }
+
+    expected_ifname = args.expected_nccl_socket_ifname.strip()
+    actual_ifname = os.environ.get("NCCL_SOCKET_IFNAME", "").strip()
+    if expected_ifname:
+        passed = actual_ifname == expected_ifname
+        result["checks"].append(
+            {
+                "name": "nccl_socket_ifname",
+                "passed": passed,
+                "expected": expected_ifname,
+                "actual": actual_ifname,
+                "reason_zh": "" if passed else "NCCL_SOCKET_IFNAME 与预期接口不一致，可能导致单机训练走到错误网卡。",
+            }
+        )
+        if not passed:
+            result["status"] = "fail"
+    else:
+        result["checks"].append(
+            {
+                "name": "nccl_socket_ifname",
+                "passed": True,
+                "expected": "",
+                "actual": actual_ifname,
+                "reason_zh": "未要求固定 NCCL_SOCKET_IFNAME。",
+            }
+        )
+
+    ps = run(["ps", "-eo", "pid=,ppid=,stat=,cmd="])
+    if ps.returncode == 0:
+        current_pid = os.getpid()
+        stale_processes = []
+        for line in ps.stdout.splitlines():
+            parts = line.strip().split(None, 3)
+            if len(parts) < 4:
+                continue
+            pid_text, ppid_text, stat, cmd = parts
+            try:
+                pid = int(pid_text)
+                ppid = int(ppid_text)
+            except ValueError:
+                continue
+            if pid == current_pid:
+                continue
+            if args.train_process_pattern in cmd:
+                stale_processes.append({"pid": pid, "ppid": ppid, "stat": stat, "cmd": cmd})
+        passed = args.allow_existing_train_processes or not stale_processes
+        result["checks"].append(
+            {
+                "name": "existing_train_processes",
+                "passed": passed,
+                "pattern": args.train_process_pattern,
+                "allow_existing": args.allow_existing_train_processes,
+                "processes": stale_processes,
+            }
+        )
+        if not passed:
+            result["status"] = "fail"
+    else:
+        result["checks"].append(
+            {
+                "name": "existing_train_processes",
+                "passed": False,
+                "stderr": ps.stderr.strip(),
+            }
+        )
+        result["status"] = "fail"
 
     smi = run([
         "nvidia-smi",
@@ -101,14 +224,14 @@ def main() -> None:
     audit_path = resolve_path(args.audit_json)
     if audit_path.exists():
         audit = json.loads(audit_path.read_text(encoding="utf-8"))
-        audit_ok = audit.get("missing_image_count") == 0 and audit.get("missing_audio_count") == 0
-        result["checks"].append({
-            "name": "data_audit",
-            "passed": audit_ok,
-            "audit_status": audit.get("status"),
-            "missing_image_count": audit.get("missing_image_count"),
-            "missing_audio_count": audit.get("missing_audio_count"),
-        })
+        audit_ok, audit_details = validate_data_audit(audit)
+        result["checks"].append(
+            {
+                "name": "data_audit",
+                "passed": audit_ok,
+                **audit_details,
+            }
+        )
         if not audit_ok:
             result["status"] = "fail"
     else:

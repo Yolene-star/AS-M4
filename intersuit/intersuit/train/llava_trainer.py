@@ -429,31 +429,36 @@ class LLaVATrainer(Trainer):
                 lr_mapper["streaming_av_module"] = self.args.streaming_av_lr
             if len(lr_mapper) > 0:
                 special_lr_parameters = [name for name, _ in opt_model.named_parameters() if any(module_keyword in name for module_keyword in lr_mapper)]
-                optimizer_grouped_parameters = [
-                    {
-                        "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and n not in special_lr_parameters and p.requires_grad)],
-                        "weight_decay": self.args.weight_decay,
-                    },
-                    {
-                        "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and n not in special_lr_parameters and p.requires_grad)],
-                        "weight_decay": 0.0,
-                    },
-                ]
+                optimizer_grouped_parameters = []
+
+                def add_param_group(params, weight_decay, lr=None):
+                    params = list(params)
+                    if not params:
+                        return
+                    group = {"params": params, "weight_decay": weight_decay}
+                    if lr is not None:
+                        group["lr"] = lr
+                    optimizer_grouped_parameters.append(group)
+
+                add_param_group(
+                    (p for n, p in opt_model.named_parameters() if (n in decay_parameters and n not in special_lr_parameters and p.requires_grad)),
+                    self.args.weight_decay,
+                )
+                add_param_group(
+                    (p for n, p in opt_model.named_parameters() if (n not in decay_parameters and n not in special_lr_parameters and p.requires_grad)),
+                    0.0,
+                )
                 for module_keyword, lr in lr_mapper.items():
                     module_parameters = [name for name, _ in opt_model.named_parameters() if module_keyword in name]
-                    optimizer_grouped_parameters.extend(
-                        [
-                            {
-                                "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and n in module_parameters and p.requires_grad)],
-                                "weight_decay": self.args.weight_decay,
-                                "lr": lr,
-                            },
-                            {
-                                "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and n in module_parameters and p.requires_grad)],
-                                "weight_decay": 0.0,
-                                "lr": lr,
-                            },
-                        ]
+                    add_param_group(
+                        (p for n, p in opt_model.named_parameters() if (n in decay_parameters and n in module_parameters and p.requires_grad)),
+                        self.args.weight_decay,
+                        lr=lr,
+                    )
+                    add_param_group(
+                        (p for n, p in opt_model.named_parameters() if (n not in decay_parameters and n in module_parameters and p.requires_grad)),
+                        0.0,
+                        lr=lr,
                     )
             else:
                 optimizer_grouped_parameters = [

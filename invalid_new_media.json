@@ -1,0 +1,239 @@
+{
+  "count": 6,
+  "entries": [
+    {
+      "candidate_id": "avut:49qzxhn6hM0",
+      "download_url": "https://huggingface.co/datasets/tsinghua-ee/AVUTBenchmark/resolve/558ca95ac16c972a4de2028fbecef2a8b82fdb00/49qzxhn6hM0.mp4",
+      "elapsed_sec": 0.0,
+      "exclusion_checks": {
+        "media_sha256": true,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": 8297157,
+      "expected_sha256": "eef6004b224150f1fdf7a873d007085e0620be7475dc2b012a6223e625fad823",
+      "media_sha256": "eef6004b224150f1fdf7a873d007085e0620be7475dc2b012a6223e625fad823",
+      "metadata": {
+        "audio_channels": 2,
+        "audio_codec": "aac",
+        "audio_sample_rate": 44100,
+        "duration": 60.047,
+        "video_codec": "vp9"
+      },
+      "original_media_sha256": "eef6004b224150f1fdf7a873d007085e0620be7475dc2b012a6223e625fad823",
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/AVUT/49qzxhn6hM0.mp4",
+      "qa_count": 2,
+      "reasons": [
+        "excluded_video_id"
+      ],
+      "remote_path": "49qzxhn6hM0.mp4",
+      "scene_audio_path": "datasets/AVUT/train_videos/49qzxhn6hM0.mp4",
+      "source_dataset": "AVUT",
+      "source_revision": "558ca95ac16c972a4de2028fbecef2a8b82fdb00",
+      "status": "skipped",
+      "task_distribution": {
+        "audio_visual": 2
+      },
+      "validation_status": "rejected",
+      "video_id": "232",
+      "video_path": "datasets/AVUT/train_videos/49qzxhn6hM0.mp4",
+      "youtube_id": "49qzxhn6hM0"
+    },
+    {
+      "candidate_id": "avut:sUSs3wy_Mrc",
+      "download_url": "https://huggingface.co/datasets/tsinghua-ee/AVUTBenchmark/resolve/558ca95ac16c972a4de2028fbecef2a8b82fdb00/sUSs3wy_Mrc.mp4",
+      "elapsed_sec": 0.0,
+      "exclusion_checks": {
+        "media_sha256": true,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": 10948832,
+      "expected_sha256": "a2a87d963568ef3bc87f19bb1dfd939f818489d6f78b5da456f96bb29477c19d",
+      "media_sha256": "a2a87d963568ef3bc87f19bb1dfd939f818489d6f78b5da456f96bb29477c19d",
+      "metadata": {
+        "audio_channels": 2,
+        "audio_codec": "aac",
+        "audio_sample_rate": 44100,
+        "duration": 105.444,
+        "video_codec": "h264"
+      },
+      "original_media_sha256": "a2a87d963568ef3bc87f19bb1dfd939f818489d6f78b5da456f96bb29477c19d",
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/AVUT/sUSs3wy_Mrc.mp4",
+      "qa_count": 1,
+      "reasons": [
+        "excluded_youtube_id"
+      ],
+      "remote_path": "sUSs3wy_Mrc.mp4",
+      "scene_audio_path": "datasets/AVUT/train_videos/sUSs3wy_Mrc.mp4",
+      "source_dataset": "AVUT",
+      "source_revision": "558ca95ac16c972a4de2028fbecef2a8b82fdb00",
+      "status": "skipped",
+      "task_distribution": {
+        "audio": 1
+      },
+      "validation_status": "rejected",
+      "video_id": "264",
+      "video_path": "datasets/AVUT/train_videos/sUSs3wy_Mrc.mp4",
+      "youtube_id": "sUSs3wy_Mrc"
+    },
+    {
+      "candidate_id": "avut:yH3Y_4wc0Ng",
+      "download_url": "https://huggingface.co/datasets/tsinghua-ee/AVUTBenchmark/resolve/558ca95ac16c972a4de2028fbecef2a8b82fdb00/yH3Y_4wc0Ng.mp4",
+      "elapsed_sec": 0.0,
+      "exclusion_checks": {
+        "media_sha256": true,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": 3107330,
+      "expected_sha256": "55810fa9c9a24483b8a63deddd5948351fe497f460c5fc24c90c1a2836b8273e",
+      "media_sha256": "55810fa9c9a24483b8a63deddd5948351fe497f460c5fc24c90c1a2836b8273e",
+      "metadata": {
+        "audio_channels": 2,
+        "audio_codec": "aac",
+        "audio_sample_rate": 44100,
+        "duration": 71.123,
+        "video_codec": "vp9"
+      },
+      "original_media_sha256": "55810fa9c9a24483b8a63deddd5948351fe497f460c5fc24c90c1a2836b8273e",
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/AVUT/yH3Y_4wc0Ng.mp4",
+      "qa_count": 3,
+      "reasons": [
+        "excluded_youtube_id"
+      ],
+      "remote_path": "yH3Y_4wc0Ng.mp4",
+      "scene_audio_path": "datasets/AVUT/train_videos/yH3Y_4wc0Ng.mp4",
+      "source_dataset": "AVUT",
+      "source_revision": "558ca95ac16c972a4de2028fbecef2a8b82fdb00",
+      "status": "skipped",
+      "task_distribution": {
+        "audio": 1,
+        "audio_visual": 2
+      },
+      "validation_status": "rejected",
+      "video_id": "300",
+      "video_path": "datasets/AVUT/train_videos/yH3Y_4wc0Ng.mp4",
+      "youtube_id": "yH3Y_4wc0Ng"
+    },
+    {
+      "candidate_id": "avut:w7CRNeCyp48",
+      "download_url": "https://huggingface.co/datasets/tsinghua-ee/AVUTBenchmark/resolve/558ca95ac16c972a4de2028fbecef2a8b82fdb00/w7CRNeCyp48.mp4",
+      "elapsed_sec": 0.0,
+      "exclusion_checks": {
+        "media_sha256": true,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": 8953968,
+      "expected_sha256": "534f08b1999a8aed1532f0eb606fa9764dbcf6784c38decece4d9ffb5e33a1d5",
+      "media_sha256": "534f08b1999a8aed1532f0eb606fa9764dbcf6784c38decece4d9ffb5e33a1d5",
+      "metadata": {
+        "audio_channels": 2,
+        "audio_codec": "aac",
+        "audio_sample_rate": 44100,
+        "duration": 60.074,
+        "video_codec": "h264"
+      },
+      "original_media_sha256": "534f08b1999a8aed1532f0eb606fa9764dbcf6784c38decece4d9ffb5e33a1d5",
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/AVUT/w7CRNeCyp48.mp4",
+      "qa_count": 2,
+      "reasons": [
+        "excluded_video_id"
+      ],
+      "remote_path": "w7CRNeCyp48.mp4",
+      "scene_audio_path": "datasets/AVUT/train_videos/w7CRNeCyp48.mp4",
+      "source_dataset": "AVUT",
+      "source_revision": "558ca95ac16c972a4de2028fbecef2a8b82fdb00",
+      "status": "skipped",
+      "task_distribution": {
+        "audio": 1,
+        "audio_visual": 1
+      },
+      "validation_status": "rejected",
+      "video_id": "9",
+      "video_path": "datasets/AVUT/train_videos/w7CRNeCyp48.mp4",
+      "youtube_id": "w7CRNeCyp48"
+    },
+    {
+      "candidate_id": "avut:D_MaoCDjG9A",
+      "download_url": "https://huggingface.co/datasets/tsinghua-ee/AVUTBenchmark/resolve/558ca95ac16c972a4de2028fbecef2a8b82fdb00/D_MaoCDjG9A.mp4",
+      "elapsed_sec": 0.0,
+      "exclusion_checks": {
+        "media_sha256": true,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": 10005617,
+      "expected_sha256": "fd1bd4b54fda43b41c48e1eeb941109c20d288af25acdfd6a8a9811fd7bd5281",
+      "media_sha256": "fd1bd4b54fda43b41c48e1eeb941109c20d288af25acdfd6a8a9811fd7bd5281",
+      "metadata": {
+        "audio_channels": 2,
+        "audio_codec": "aac",
+        "audio_sample_rate": 44100,
+        "duration": 56.174,
+        "video_codec": "h264"
+      },
+      "original_media_sha256": "fd1bd4b54fda43b41c48e1eeb941109c20d288af25acdfd6a8a9811fd7bd5281",
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/AVUT/D_MaoCDjG9A.mp4",
+      "qa_count": 3,
+      "reasons": [
+        "excluded_video_id"
+      ],
+      "remote_path": "D_MaoCDjG9A.mp4",
+      "scene_audio_path": "datasets/AVUT/train_videos/D_MaoCDjG9A.mp4",
+      "source_dataset": "AVUT",
+      "source_revision": "558ca95ac16c972a4de2028fbecef2a8b82fdb00",
+      "status": "skipped",
+      "task_distribution": {
+        "audio": 1,
+        "audio_visual": 2
+      },
+      "validation_status": "rejected",
+      "video_id": "8",
+      "video_path": "datasets/AVUT/train_videos/D_MaoCDjG9A.mp4",
+      "youtube_id": "D_MaoCDjG9A"
+    },
+    {
+      "candidate_id": "avut:GCnLUxA-67A",
+      "download_url": "https://huggingface.co/datasets/tsinghua-ee/AVUTBenchmark/resolve/558ca95ac16c972a4de2028fbecef2a8b82fdb00/GCnLUxA-67A.mp4",
+      "elapsed_sec": 0.0,
+      "exclusion_checks": {
+        "media_sha256": true,
+        "video_id": true,
+        "youtube_id": true
+      },
+      "expected_bytes": 6495846,
+      "expected_sha256": "5674c1ccc13faeb4c96791cace625d215e19814cd19adf4e954fd98d7a6e8e07",
+      "media_sha256": "5674c1ccc13faeb4c96791cace625d215e19814cd19adf4e954fd98d7a6e8e07",
+      "metadata": {
+        "audio_channels": 2,
+        "audio_codec": "aac",
+        "audio_sample_rate": 44100,
+        "duration": 53.406,
+        "video_codec": "vp9"
+      },
+      "original_media_sha256": "5674c1ccc13faeb4c96791cace625d215e19814cd19adf4e954fd98d7a6e8e07",
+      "path": "intersuit/datasets/NEW_AV_TRAIN/quarantine/AVUT/GCnLUxA-67A.mp4",
+      "qa_count": 3,
+      "reasons": [
+        "excluded_video_id"
+      ],
+      "remote_path": "GCnLUxA-67A.mp4",
+      "scene_audio_path": "datasets/AVUT/train_videos/GCnLUxA-67A.mp4",
+      "source_dataset": "AVUT",
+      "source_revision": "558ca95ac16c972a4de2028fbecef2a8b82fdb00",
+      "status": "skipped",
+      "task_distribution": {
+        "audio": 1,
+        "audio_visual": 2
+      },
+      "validation_status": "rejected",
+      "video_id": "215",
+      "video_path": "datasets/AVUT/train_videos/GCnLUxA-67A.mp4",
+      "youtube_id": "GCnLUxA-67A"
+    }
+  ],
+  "source_candidate_count": 550,
+  "status": "RECORDED"
+}
